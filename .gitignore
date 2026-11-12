@@ -1,0 +1,10 @@
+*~
+*.gz
+*.pdf
+*.swp
+*.tar
+*.tgz
+*.zip
+.DS_Store
+.idea/
+tmp/
