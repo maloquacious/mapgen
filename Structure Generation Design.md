@@ -622,6 +622,13 @@ Feature and province-seed geometry shifts by the same distance in kilometers, th
 IDs, keys, and component numbers assigned before the shift are kept; they are not renumbered from the new cell order.
 Shifts are relative to the input checkpoint, as in `landmask`.
 
+Recentering is the last step of the stage: the result is generated in the input's frame, then translated.
+Nothing is regenerated after the shift, so a recentered artifact is exactly the unrecentered one moved by whole cells, including its rock noise and rock classification.
+Feature `provinces` lists, chain IDs, and diagnostics counts are unchanged.
+The coast's working grid need not hold a whole number of shifted cells, so it is not resampled; its distance queries and chains are offset by the shift, and `preview-coast.png` shows the moved coast.
+The manifest's `recentering` record is always present: `applied`, the shift in cells (`shift_x`, `shift_y`) and in km, the centering's ambiguity flags and component counts, and a statement of the transform.
+A recentered artifact's `features.json` describes the shifted world, so it is a fixture for that world and not for the unshifted continental input.
+
 The stage that fixes the north and south edges, climate, is responsible for what lies across them.
 Structure makes no promise that a feature avoids the eventual polar edges; the user avoids that by recentering before climate.
 
@@ -654,6 +661,7 @@ Evaluate structural placement before adding terrain noise.
 4. Specify geological proxy conversion and implement rock classification as its own deterministic substep.
    Done; see "Geology proxies and rock classification" in the version one schema.
 5. Add optional complete-result recentering after the coordinate and seam contracts are verified.
+   Done; see "Recentering".
 
 The existing `cmd/landmask` reads continental affinity.
 Keep that behavior explicitly identified as affinity-based layout selection; it remains useful for inspection.

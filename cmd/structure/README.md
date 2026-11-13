@@ -16,11 +16,11 @@ go run ./cmd/structure --in tmp/c96 --features internal/structure/testdata/fixtu
 ```
 
 The design is in [Structure Generation Design.md](<../../Structure Generation Design.md>).
-This covers implementation steps 1 to 4 of that design: feature records, geometry queries, artifact storage, fixture input, provinces, the coast interpretation, automatic placement, and rock classification.
+This covers implementation steps 1 to 5 of that design: feature records, geometry queries, artifact storage, fixture input, provinces, the coast interpretation, automatic placement, rock classification, and recentering.
 
 ## Not implemented yet
 
-- `--recenter` and `--config`.
+- `--config`.
 
 ## Flags
 
@@ -31,6 +31,7 @@ This covers implementation steps 1 to 4 of that design: feature records, geometr
 | `--features` | Feature fixture file, in the `mapgen-structure-features-v1` schema. If omitted, features are placed automatically |
 | `--seed` | Structure seed, unsigned 64-bit. If omitted, the continental input's seed is used; the manifest records the seed and which of the two it was. It decides province seeds, boundaries, volcanic draws, automatic placement, and rock noise |
 | `--provisional-land-fraction` | Fraction of cells treated as land while placing features; default 0.325 |
+| `--recenter` | Translate the complete result so the largest provisional landmass is centered; default false. See below |
 | `--png` | Write `preview.png`, `preview-rock.png`, and `preview-coast.png`; default true |
 | `--png-scale` | Sampling interval in cells for `preview.png`; default 1. `preview-coast.png` has its own scale |
 | `--version` | Print the generator version |
@@ -58,6 +59,14 @@ The rules and values are in the design under "Geology proxies and rock classific
 
 On the full-size seed 42 map, provisional land is about 54 percent sedimentary, 32 percent metamorphic, and 14 percent igneous.
 
+## Recentering
+
+`--recenter` centers the largest provisional landmass with the convention `continents` and `landmask` use: eight-connected land on the torus, moved by whole cells to put its circular mean at the center.
+The result is generated first and then translated, so it is the unrecentered artifact moved by whole cells: every raster shifts cyclically, feature geometry and province seeds move by the same distance in km, and IDs, keys, rock noise, and rocks are kept, not regenerated.
+The shift is relative to the continental input and is recorded under `recentering` in the manifest; without the flag the record says `applied: false`.
+An input that `continents` already centered usually moves by a cell or two, or not at all.
+The features of a recentered artifact describe the shifted world, so they are not a fixture for the unshifted input.
+
 ## Fixtures
 
 A fixture is drawn for one particular continental artifact: its `domain` must equal that artifact's physical extent.
@@ -80,7 +89,7 @@ The `features.json` of any structure artifact is itself a valid fixture for the 
 - `rock-noise.f32`: the rock noise `rv`, saved because ore selection uses it again. `rock.u8` follows from these four fields, and `Load` checks that it does.
 - `diagnostics.json`: the coast interpretation, events requested per family, features placed per type, omissions, warnings, and cells of each rock on provisional land and ocean. The only warning so far is a backbone that crosses itself.
   The coast section gives the working grid (about 50 km per cell), the greatest distance from the coast inland and offshore, and every coast chain: its length, the land and water areas it separates, and whether it circles the world.
-- `manifest.json`: format and generator version, the input manifest and its checksum, seed, grid, mode (`automatic` or `fixture`), provisional selection, what is absent, and checksums for every saved file. Input and fixture paths are not recorded.
+- `manifest.json`: format and generator version, the input manifest and its checksum, seed, grid, mode (`automatic` or `fixture`), provisional selection, rock parameters, recentering, and checksums for every saved file. Input and fixture paths are not recorded.
 - `preview.png`: provinces in pale tones by type (shield tan, sedimentary green, volcanic pink, oceanic blue) with their boundaries, the provisional coast in grey, each feature's envelope tinted by type, and backbones as dark lines.
 
 - `preview-rock.png`: rock types, sedimentary tan, igneous red, metamorphic blue, paler offshore, with the provisional coast. It uses the `--png-scale` of `preview.png`.

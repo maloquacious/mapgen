@@ -69,6 +69,9 @@ type Coast struct {
 	Land                      []byte    // row-major; 1 where the working cell is land
 	Distance                  []float64 // row-major; see CoastDistance. ±Inf when there is no coast
 	Chains                    []Chain
+	// offset is how far the coast has been translated since it was
+	// interpreted; queries undo it.
+	offset Point
 }
 
 // CoastSummary is the coast section of the diagnostics.
@@ -115,7 +118,7 @@ func (c *Coast) DistanceAt(p Point) float64 {
 // sample interpolates a working-grid field at p, between cell centers on
 // the torus.
 func (c *Coast) sample(field []float64, p Point) float64 {
-	fx, fy := p.X/c.CellWidthKM-0.5, p.Y/c.CellHeightKM-0.5
+	fx, fy := (p.X-c.offset.X)/c.CellWidthKM-0.5, (p.Y-c.offset.Y)/c.CellHeightKM-0.5
 	x0, y0 := math.Floor(fx), math.Floor(fy)
 	tx, ty := fx-x0, fy-y0
 	at := func(dx, dy int) float64 {

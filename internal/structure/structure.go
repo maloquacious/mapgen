@@ -13,7 +13,8 @@
 //
 // Features come from an explicit fixture file or from automatic placement.
 // Rock classification converts features and provinces to geological proxies
-// and classifies every cell; see rocks.go. Recentering is not implemented.
+// and classifies every cell; see rocks.go. An optional final step translates
+// the complete result to center the largest landmass; see recenter.go.
 package structure
 
 import (
@@ -90,6 +91,7 @@ type Manifest struct {
 	ProvinceParameters      ProvinceParams    `json:"province_parameters"`
 	CoastParameters         CoastParams       `json:"coast_parameters"`
 	PlacementParameters     *PlacementParams  `json:"placement_parameters,omitzero"`
+	Recentering             Recentering       `json:"recentering"`
 	RockClassification      string            `json:"rock_classification"`
 	RockParameters          *RockParams       `json:"rock_parameters,omitzero"`
 	Rock                    *File             `json:"rock,omitzero"`
@@ -141,6 +143,7 @@ type Options struct {
 	Fraction float64 // provisional land fraction, in [0,1]
 	Features []byte  // contents of a feature fixture; nil places features automatically
 	Version  string  // generator version
+	Recenter bool    // translate the complete result to center the largest provisional landmass
 }
 
 func checksum(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
@@ -254,6 +257,11 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 	r.Manifest.RockClassification, r.Manifest.RockParameters = RockAlgorithm, &rp
 	r.Geology, r.Rock = geo.fields, geo.rock
 	r.Diagnostics.Rocks = summarizeRocks(land, geo.rock)
+	if o.Recenter {
+		if err := recenter(ctx, r); err != nil {
+			return nil, err
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

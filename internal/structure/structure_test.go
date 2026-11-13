@@ -6,8 +6,10 @@ package structure_test
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -349,5 +351,130 @@ func TestSelfCrossingWarns(t *testing.T) {
 	}
 	if w := r.Diagnostics.Warnings; len(w) != 1 || !strings.Contains(w[0], "feature 4") {
 		t.Errorf("warnings: %v", w)
+	}
+}
+
+// uncentered writes the 96 x 48 artifact of continents without its own
+// recentering, so the structure stage has a shift to make.
+func uncentered(t *testing.T) string {
+	t.Helper()
+	p, err := fracture.DefaultParams(42, 96, 48, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Recenter = false
+	r, err := fracture.Generate(t.Context(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(t.TempDir(), "uncentered")
+	if err := continent.Write(dir, continent.NewManifest("test", r), r); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func generate(t *testing.T, o structure.Options) *structure.Result {
+	t.Helper()
+	o.Seed, o.Fraction, o.Version = new(uint64(7)), 0.325, "test"
+	r, err := structure.Generate(t.Context(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+// shifted reports whether raster b is raster a with cell (col, row) moved to
+// ((col+dx) mod cols, (row+dy) mod rows).
+func shifted[T comparable](a, b []T, cols, rows, dx, dy int) bool {
+	for row := range rows {
+		for col := range cols {
+			if a[row*cols+col] != b[(row+dy)%rows*cols+(col+dx)%cols] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func TestRecenter(t *testing.T) {
+	in := uncentered(t)
+	for _, features := range [][]byte{nil, fixture(t)} {
+		a := generate(t, structure.Options{In: in, Features: features})
+		b := generate(t, structure.Options{In: in, Features: features, Recenter: true})
+		g := a.Manifest.Grid
+		cols, rows := g.Columns, g.Rows
+		c := b.Manifest.Recentering
+		if a.Manifest.Recentering.Applied || !c.Applied || c.ShiftX == 0 || c.ShiftY == 0 ||
+			c.ShiftXKM != float64(c.ShiftX)*6 || c.ShiftYKM != float64(c.ShiftY)*6 {
+			t.Fatalf("recentering %+v, unrecentered %+v", c, a.Manifest.Recentering)
+		}
+		// Every raster moves by the same whole cells.
+		if !shifted(a.Land, b.Land, cols, rows, c.ShiftX, c.ShiftY) || !shifted(a.Owner, b.Owner, cols, rows, c.ShiftX, c.ShiftY) ||
+			!shifted(a.Rock, b.Rock, cols, rows, c.ShiftX, c.ShiftY) {
+			t.Error("mask, ownership, or rock did not move with the shift")
+		}
+		for _, set := range []struct {
+			a, b map[string]*fracture.FractureField
+		}{{a.Fields, b.Fields}, {a.Geology, b.Geology}} {
+			for name, f := range set.a {
+				if !shifted(f.Values, set.b[name].Values, cols, rows, c.ShiftX, c.ShiftY) {
+					t.Errorf("field %s did not move with the shift", name)
+				}
+			}
+		}
+		// Geometry moves by the shift in km, then by whole worlds; IDs and
+		// keys are kept, and every feature answers queries as before.
+		dom := a.Domain()
+		for i, fa := range a.Features.Features {
+			fb := b.Features.Features[i]
+			if fa.ID != fb.ID || *fa.Key != *fb.Key || !slices.Equal(fa.Provinces, fb.Provinces) {
+				t.Errorf("feature %d: identity changed", fa.ID)
+			}
+			sa, sb := fa.Shape(dom), fb.Shape(dom)
+			for x := 3.0; x < dom.WidthKM; x += 37 {
+				for y := 3.0; y < dom.HeightKM; y += 29 {
+					if sa.Contains(structure.Point{X: x, Y: y}) != sb.Contains(structure.Point{X: x + c.ShiftXKM, Y: y + c.ShiftYKM}) {
+						t.Fatalf("feature %d: envelope differs at (%v, %v) after shifting", fa.ID, x, y)
+					}
+				}
+			}
+		}
+		for i, pa := range a.Provinces.Provinces {
+			pb := b.Provinces.Provinces[i]
+			x := math.Mod(pa.Seed.X+c.ShiftXKM, dom.WidthKM)
+			y := math.Mod(pa.Seed.Y+c.ShiftYKM, dom.HeightKM)
+			if pb.ID != pa.ID || pb.Type != pa.Type || pb.Component != pa.Component || math.Abs(pb.Seed.X-x) > 1e-9 || math.Abs(pb.Seed.Y-y) > 1e-9 {
+				t.Errorf("province %d: %+v, want %+v moved to (%v, %v)", pa.ID, pb, pa, x, y)
+			}
+		}
+		if !reflect.DeepEqual(a.Diagnostics.Rocks, b.Diagnostics.Rocks) || !reflect.DeepEqual(a.Diagnostics.Placed, b.Diagnostics.Placed) {
+			t.Error("diagnostics changed")
+		}
+		// The coast moves too.
+		if da, db := a.Coast.DistanceAt(structure.Point{X: 100, Y: 100}), b.Coast.DistanceAt(structure.Point{X: 100 + c.ShiftXKM, Y: 100 + c.ShiftYKM}); math.Abs(da-db) > 1e-9 {
+			t.Errorf("coast distance %v, moved %v", da, db)
+		}
+		// The result is centered: centering it again would not move it.
+		again, err := fracture.FindCentering(t.Context(), b.Fields[continent.FieldAffinity], 0.325)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if again.X != 0 || again.Y != 0 {
+			t.Errorf("recentered result would move again by (%d, %d)", again.X, again.Y)
+		}
+		// It is written, loaded, and repeatable byte for byte.
+		dir := filepath.Join(t.TempDir(), "a")
+		if err := structure.Write(t.Context(), dir, b, 1); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := structure.Load(t.Context(), dir); err != nil {
+			t.Fatal(err)
+		}
+		dir2 := filepath.Join(t.TempDir(), "b")
+		if err := structure.Write(t.Context(), dir2, generate(t, structure.Options{In: in, Features: features, Recenter: true}), 1); err != nil {
+			t.Fatal(err)
+		}
+		sameFiles(t, files(t, dir), files(t, dir2))
 	}
 }

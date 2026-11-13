@@ -42,7 +42,8 @@ func run(ctx context.Context, args []string) error {
 	seedFlag := fs.String("seed", "", "structure seed, unsigned 64-bit (default: the continental input's seed)")
 	fraction := fs.Float64("provisional-land-fraction", 0.325, "fraction of cells treated as land while placing features, in [0,1]")
 	features := fs.String("features", "", "feature fixture file; if omitted, features are placed automatically")
-	png := fs.Bool("png", true, "write preview.png")
+	recenter := fs.Bool("recenter", false, "translate the complete result to center the largest provisional landmass")
+	png := fs.Bool("png", true, "write the previews")
 	scale := fs.Int("png-scale", 1, "preview sampling interval in cells; 1 shows every cell")
 	version := fs.Bool("version", false, "print version and exit")
 	if err := fs.Parse(args); err != nil {
@@ -78,6 +79,7 @@ func run(ctx context.Context, args []string) error {
 	}
 	r, err := structure.Generate(ctx, structure.Options{
 		In: *in, Seed: seed, Fraction: *fraction, Features: fixture, Version: mapgen.Version().String(),
+		Recenter: *recenter,
 	})
 	if err != nil {
 		return err
@@ -91,6 +93,9 @@ func run(ctx context.Context, args []string) error {
 	}
 	m := r.Manifest
 	log.Printf("seed %d (%s)", m.Seed, m.SeedSource)
+	if c := m.Recentering; c.Applied {
+		log.Printf("recentered by (%d, %d) cells, (%g, %g) km", c.ShiftX, c.ShiftY, c.ShiftXKM, c.ShiftYKM)
+	}
 	log.Printf("wrote %s: %d x %d, %s mode, %d features, %d provisional land cells", *out, m.Grid.Columns, m.Grid.Rows, m.Mode, m.FeatureCount, m.ProvisionalLandCells)
 	for _, o := range r.Diagnostics.Omitted {
 		log.Printf("omitted: %s", o)

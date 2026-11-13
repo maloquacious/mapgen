@@ -42,7 +42,8 @@ Contracts and invariants (wrapping, determinism, land fraction, artifact formats
 
 3. `cmd/structure`: attaches geological features (belts, rifts, arcs, faults, plateaus, basins) to a `continents` artifact and writes a self-contained structure checkpoint.
    It partitions the map into geological provinces and interprets the provisional coast (coast distance and coast chains on a 50 km working grid). Features come from an explicit fixture file or from automatic placement, which places collision belts with plateaus and foreland basins, active margins with inland basins, old orogens, rifts, island arcs, and faults.
-   Rock classification converts features and provinces to geological proxies (pressure, shear, igneous influence) and classifies every cell as sedimentary, igneous, or metamorphic; recentering is not implemented.
+   Rock classification converts features and provinces to geological proxies (pressure, shear, igneous influence) and classifies every cell as sedimentary, igneous, or metamorphic.
+   `--recenter` translates the complete result to center the largest landmass.
    See [cmd/structure/README.md](cmd/structure/README.md).
 
 Later stages (terrain, the terrain-based landmask, drainage, climate, biomes, resources) are not implemented yet.
@@ -55,7 +56,7 @@ The planned generation order is `continents → structure → terrain → landma
 - `internal/fracture`: the disc-sum fracture field generator and recentering.
 - `internal/continent`: storing and loading the continental artifact.
 - `internal/landmask`: creating, storing, and loading the land/ocean artifact.
-- `internal/structure`: feature records and their validation, toroidal geometry queries, province partitioning, coast interpretation, automatic placement, geology proxies and rock classification, and the structure artifact.
+- `internal/structure`: feature records and their validation, toroidal geometry queries, province partitioning, coast interpretation, automatic placement, geology proxies and rock classification, recentering, and the structure artifact.
 - `internal/artifact`: helpers shared by packages that publish artifact directories.
 - `internal/prng`: reproducible random streams derived from a seed and a domain name.
 - `internal/cerrs`: constant sentinel errors.
