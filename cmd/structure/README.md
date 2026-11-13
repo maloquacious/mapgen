@@ -16,11 +16,10 @@ go run ./cmd/structure --in tmp/c96 --features internal/structure/testdata/fixtu
 ```
 
 The design is in [Structure Generation Design.md](<../../Structure Generation Design.md>).
-This covers implementation steps 1 to 3 of that design: feature records, geometry queries, artifact storage, fixture input, provinces, the coast interpretation, and automatic placement.
+This covers implementation steps 1 to 4 of that design: feature records, geometry queries, artifact storage, fixture input, provinces, the coast interpretation, automatic placement, and rock classification.
 
 ## Not implemented yet
 
-- Rock classification. The manifest records it as `absent`.
 - `--recenter` and `--config`.
 
 ## Flags
@@ -30,9 +29,9 @@ This covers implementation steps 1 to 3 of that design: feature records, geometr
 | `--in` | Continental artifact directory; default `tmp/continents` |
 | `--out` | New output directory; default `tmp/structure`. An existing one is never replaced |
 | `--features` | Feature fixture file, in the `mapgen-structure-features-v1` schema. If omitted, features are placed automatically |
-| `--seed` | Structure seed, unsigned 64-bit. If omitted, the continental input's seed is used; the manifest records the seed and which of the two it was. It decides province seeds, boundaries, volcanic draws, and automatic placement |
+| `--seed` | Structure seed, unsigned 64-bit. If omitted, the continental input's seed is used; the manifest records the seed and which of the two it was. It decides province seeds, boundaries, volcanic draws, automatic placement, and rock noise |
 | `--provisional-land-fraction` | Fraction of cells treated as land while placing features; default 0.325 |
-| `--png` | Write `preview.png` and `preview-coast.png`; default true |
+| `--png` | Write `preview.png`, `preview-rock.png`, and `preview-coast.png`; default true |
 | `--png-scale` | Sampling interval in cells for `preview.png`; default 1. `preview-coast.png` has its own scale |
 | `--version` | Print the generator version |
 
@@ -46,6 +45,18 @@ Features keep 100 km clear of one another, except faults, which may cross anythi
 Each request gets at most 32 candidates; one that cannot be placed is listed under `omitted` in `diagnostics.json` with the reasons, and printed.
 A world too small for a belt gets none; a fault needs only 300 km of land.
 The rules and parameters are in the design under "Automatic placement"; the manifest records the parameters as `placement_parameters`.
+
+## Rock classification
+
+Every run, in either mode, classifies every cell, land and ocean, as sedimentary, igneous, or metamorphic.
+Features and provinces are first converted to three dimensionless proxies: `pressure` (compression positive, extension negative), `shear`, and `igneous` influence.
+Each feature contributes at full strength through the middle of its envelope and fades to nothing a set number of half widths out; volcanic provinces, and ocean beyond a 150–300 km shelf, add igneous influence.
+The layer reference's rock rule is then applied with its own rock noise, `rv`.
+So collision belts have metamorphic cores, active margins, island arcs, rifts, and volcanic provinces carry igneous rock, shelves and quiet interiors are mostly sedimentary, and open ocean is igneous where it is not metamorphic.
+The proxies are procedural stand-ins, not measured stress.
+The rules and values are in the design under "Geology proxies and rock classification"; the manifest records them as `rock_parameters`.
+
+On the full-size seed 42 map, provisional land is about 54 percent sedimentary, 32 percent metamorphic, and 14 percent igneous.
 
 ## Fixtures
 
@@ -64,10 +75,15 @@ The `features.json` of any structure artifact is itself a valid fixture for the 
 - `provisional-land.u8`: one byte per cell, 1 for provisional land. This is placement data, not the final landmask.
 - `provinces.json` and `provinces.u32`: the geological provinces and the province ID of every cell, as little-endian uint32. Every cell has an owner. Islands and enclosed waters under 20,000 square km belong to the province around them.
 - `affinity.f32`, `continental.f32`, `coast.f32`: retained continental fields.
-- `diagnostics.json`: the coast interpretation, events requested per family, features placed per type, omissions, and warnings. The only warning so far is a backbone that crosses itself.
+- `rock.u8`: one byte per cell, 1 sedimentary, 2 igneous, 3 metamorphic; 0 would mean unclassified and does not occur.
+- `pressure.f32`, `shear.f32`, `igneous.f32`: the geology proxies, listed under `geology_fields` in the manifest.
+- `rock-noise.f32`: the rock noise `rv`, saved because ore selection uses it again. `rock.u8` follows from these four fields, and `Load` checks that it does.
+- `diagnostics.json`: the coast interpretation, events requested per family, features placed per type, omissions, warnings, and cells of each rock on provisional land and ocean. The only warning so far is a backbone that crosses itself.
   The coast section gives the working grid (about 50 km per cell), the greatest distance from the coast inland and offshore, and every coast chain: its length, the land and water areas it separates, and whether it circles the world.
 - `manifest.json`: format and generator version, the input manifest and its checksum, seed, grid, mode (`automatic` or `fixture`), provisional selection, what is absent, and checksums for every saved file. Input and fixture paths are not recorded.
 - `preview.png`: provinces in pale tones by type (shield tan, sedimentary green, volcanic pink, oceanic blue) with their boundaries, the provisional coast in grey, each feature's envelope tinted by type, and backbones as dark lines.
+
+- `preview-rock.png`: rock types, sedimentary tan, igneous red, metamorphic blue, paler offshore, with the provisional coast. It uses the `--png-scale` of `preview.png`.
 
 - `preview-coast.png`: distance from the provisional coast in 100 km bands, tan inland and blue offshore, darker farther away, with the smoothed coast chains as dark lines. It is drawn from the working grid, at least 1200 pixels wide.
 

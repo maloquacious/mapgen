@@ -4,6 +4,8 @@
 package structure_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"slices"
@@ -164,7 +166,7 @@ func TestLoad(t *testing.T) {
 	}
 	m := r.Manifest
 	if m.Format != structure.Format || m.Mode != structure.ModeFixture || m.Seed != 7 || m.SeedSource != structure.SeedExplicit ||
-		m.RockClassification != structure.Absent {
+		m.RockClassification != structure.RockAlgorithm {
 		t.Errorf("manifest: %+v", m)
 	}
 	if m.FeatureCount != 7 || len(r.Features.Features) != 7 || r.Diagnostics.Placed[structure.TypeBasin] != 2 {
@@ -204,7 +206,7 @@ func TestLoad(t *testing.T) {
 	if err := structure.Write(t.Context(), out, r, 0); err == nil {
 		t.Error("replaced an existing artifact")
 	}
-	for _, name := range []string{structure.FeaturesFile, structure.MaskFile, structure.DiagnosticsFile, structure.ProvincesFile, structure.OwnershipFile, "coast.f32"} {
+	for _, name := range []string{structure.FeaturesFile, structure.MaskFile, structure.DiagnosticsFile, structure.ProvincesFile, structure.OwnershipFile, "coast.f32", structure.RockFile, "pressure.f32", "rock-noise.f32"} {
 		path := filepath.Join(out, name)
 		b, err := os.ReadFile(path)
 		if err != nil {
@@ -221,6 +223,34 @@ func TestLoad(t *testing.T) {
 		if err := os.WriteFile(path, b, 0o644); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestLoadChecksRocks(t *testing.T) {
+	// A rock raster that disagrees with its saved proxies is rejected even
+	// when its checksum is updated to match.
+	out := write(t, continents(t), fixture(t))
+	path := filepath.Join(out, structure.RockFile)
+	rock, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := os.ReadFile(filepath.Join(out, structure.ManifestFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := sha256.Sum256(rock)
+	rock[100] = 1 + rock[100]%3 // a different classified rock
+	sum := sha256.Sum256(rock)
+	manifest = []byte(strings.Replace(string(manifest), hex.EncodeToString(old[:]), hex.EncodeToString(sum[:]), 1))
+	if err := os.WriteFile(path, rock, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(out, structure.ManifestFile), manifest, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := structure.Load(t.Context(), out); err == nil || !strings.Contains(err.Error(), "saved proxies") {
+		t.Errorf("loaded an inconsistent rock raster: %v", err)
 	}
 }
 

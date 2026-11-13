@@ -179,10 +179,10 @@ A continental affinity value is none of these quantities.
 
 The existing rock recipe refers to pressure and shear derived from plate boundaries.
 This static event model has no moving plates.
-Before implementing that classifier, define and version the conversion from events to dimensionless pressure, shear, and igneous-influence proxies, including their normalization and distance falloff.
+The conversion from events to dimensionless pressure, shear, and igneous-influence proxies, with their normalization and distance falloff, is defined and versioned under "Geology proxies and rock classification" in the version one schema.
 Do not silently label a procedural proxy as measured stress or reuse unrelated noise as pressure.
 
-Once that conversion is specified, rock classification can be a deterministic substep of `structure` with its own random stream.
+With that conversion, rock classification can be a deterministic substep of `structure` with its own random stream.
 It must cover ocean and continental cells, distinguish unclassified from classified absence, and preserve the layer reference's rock and ore eligibility rules.
 Any change to that recipe must be explicit.
 The percentages quoted in the reference are not acceptance targets established for this new model.
@@ -345,6 +345,7 @@ All streams use `prng.New(seed, domain, sequence)` with the structure seed and t
 | `structure-v1/provinces/types` | 0 | Volcanic draws, one per land province in ID order |
 | `structure-v1/requests` | Family number | Request attributes for one family: eight values per request, whatever the family uses |
 | `structure-v1/place/<family>` | Request index within the family | All candidate attempts for one requested event |
+| `structure-v1/rocks/noise` | Octave number | The fracture field for one octave of rock noise |
 
 Families are `collision` (0), `active_margin` (1), `old_orogen` (2), `rift` (3), `island_arc` (4), and `fault` (5).
 The numbers are fixed, so adding a family does not change what the others draw.
@@ -502,6 +503,80 @@ Active margins have 1,000–2,500 m and 2,000–4,000 m, and their inland basins
 Island arcs have −1,500 to 500 m regional elevation, so they cross sea level, and 1,000–3,000 m relief; these two ranges are this design's own starting values.
 Faults carry no targets.
 
+### Geology proxies and rock classification
+
+Rock classification turns features and provinces into three dimensionless proxies, then applies the layer reference's rock rule to every cell, land and ocean.
+It runs in both modes, after features are final and provinces are owned.
+The manifest records the parameters as `rock_parameters`, with proxy conversion `geology-proxy-v1` and classifier `rocks-v1`, and sets `rock_classification` to `rocks-v1`.
+
+The proxies are procedural stand-ins for geological context.
+They are not measured or simulated stress, and their names say only which term of the rock rule they feed.
+
+| Proxy | Range | Meaning |
+| --- | --- | --- |
+| `pressure` | −2 to 2 | Compressional context, positive, or extensional context, negative |
+| `shear` | 0 to 1 | Strike-slip and oblique context |
+| `igneous` | 0 to 1 | Volcanic and intrusive influence |
+
+**Profiles.**
+A linear feature contributes at a point by its cross-belt position `u = Cross(p)` from the geometry queries.
+Its strength is `1 − smoothstep(core, reach, u)`, where `smoothstep(a, b, x)` is 0 below `a`, 1 above `b`, and `t²(3 − 2t)` between, with `t = (x − a)/(b − a)`.
+So a feature is at full strength through the middle of its envelope and fades to nothing at `reach` half widths from its backbone.
+Stress (pressure and shear) and igneous influence have separate profiles, so igneous influence can reach farther from a convergent margin than its stress does.
+An area feature contributes its `Mask(p)`.
+
+| Feature | Pressure | Shear | Igneous | Stress core, reach | Igneous core, reach |
+| --- | --- | --- | --- | --- | --- |
+| Collision belt | +2.0 | 0.3 | 0 | 0.6, 1.5 | |
+| Active margin | +1.6 | 0.4 | 1.0 | 0.6, 1.5 | 1.0, 3.0 |
+| Old orogen | +1.2 | 0.2 | 0 | 0.5, 1.2 | |
+| Rift | −1.2 | 0.2 | 0.7 | 0.5, 1.5 | 0.5, 2.0 |
+| Island arc | +0.8 | 0.2 | 1.0 | 0.6, 1.5 | 1.0, 2.0 |
+| Strike-slip fault | 0 | 1.0 | 0 | 0.5, 2.0 | |
+| Thrust fault | +1.0 | 0.3 | 0 | 0.5, 2.0 | |
+| Normal fault | −0.8 | 0.3 | 0 | 0.5, 2.0 | |
+| Plateau | +0.8 | 0 | 0 | outline mask | |
+| Basin | 0 | 0 | 0 | | |
+
+A contribution is the table value times the strength.
+Pressure reaches 2 because the rule's noise term, `2·rv − 1`, spans −1 to 1: with pressure limited to 1, a collision core's stress term would be 0.65 and the noise would hide most belts.
+At 2, a collision core is metamorphic throughout, an active margin's core in about two cells of three, and the share falls off across each flank.
+The rock rule reacts to igneous influence only above 0.25, so an igneous value is effectively a switch and its profile sets how far the igneous zone reaches.
+Collision belts, old orogens, and plateaus therefore have none: a small value would do nothing, and one above 0.25 would make every non-metamorphic cell of a belt's core igneous.
+Provinces add igneous influence without falloff: 0.6 over every `volcanic` province, and 0.3 over `oceanic` provinces for basaltic crust.
+The oceanic value is withheld from a continental shelf: it is scaled by `smoothstep(150, 300, −coast distance)`, using the coast interpretation's distance in km, so it is absent within 150 km of the provisional coast and full beyond 300 km.
+A world with no coast has no shelf.
+
+**Combining.**
+Features overlap, so contributions are combined per cell without summing whole envelopes:
+pressure is the greatest positive contribution plus the most negative one, clamped to [−2, 2], so compression and extension that overlap offset each other;
+shear and igneous influence are the greatest contribution of any feature or province.
+A cell no feature reaches has zero pressure and shear, and the igneous influence of its province.
+
+**Rock noise.**
+`rv` is four octaves of fracture-field noise, independent of every proxy.
+Octave `k`, from 0 to 3, has wavelength `400 / 2^k` km and weight `2^−k`.
+Each octave is a fracture field on the grid nearest a quarter of its wavelength that tiles the world, at least 2 by 2 cells, with one disc per two cells, radii between a quarter and a half of the wavelength, and falloff 2, drawn from stream `structure-v1/rocks/noise` with the octave number as the sequence.
+A cell's raw value is the weighted sum of the octaves sampled bilinearly on the torus at its center.
+The raw values are converted to their mid-rank over all cells, `n = (below + equal/2) / cells`, which is uniform on [0, 1] whatever the grid, and `rv = n²`.
+
+**Classification.**
+The layer reference's rule is applied unchanged, in order:
+
+1. Metamorphic when `(|pressure| + shear)/2 + (2·rv − 1) >= limit`, where `limit` is 0.09 when `shear > |pressure|`, a transform-dominated cell, and 0.10 otherwise.
+2. Igneous when `rv > 0.4` or `igneous > 0.25`.
+3. Sedimentary otherwise.
+
+With no feature nearby, about 26 percent of land is metamorphic, 11 percent igneous, and 63 percent sedimentary; the reference's shares came from plate boundaries everywhere and are not targets here.
+Ocean beyond the shelf is igneous wherever it is not metamorphic.
+
+**Storage.**
+`rock.u8` holds one byte per cell: 0 unclassified, 1 sedimentary, 2 igneous, 3 metamorphic.
+A classified artifact has no 0; 0 exists so that later stages can tell a missing classification from a classified cell.
+`pressure.f32`, `shear.f32`, `igneous.f32`, and `rock-noise.f32` (the `rv` values) are saved as float32 fields under `geology_fields` in the manifest.
+Resources need `rv` again for ore selection, so it is saved rather than rebuilt.
+`diagnostics.json` counts each rock on provisional land and on provisional ocean, and `preview-rock.png` shows the rock types with the provisional coast.
+
 ### Geometry queries
 
 These are the handoff to terrain.
@@ -577,6 +652,7 @@ Evaluate structural placement before adding terrain noise.
    Done, in three parts: coast distance and coast chains; inland features, which are collision belts with their plateaus and basins, old orogens, and rifts; and coastal features, which are active margins, island arcs, and faults.
    Not yet placed: interrupted old belts, and intermontane and interior basins.
 4. Specify geological proxy conversion and implement rock classification as its own deterministic substep.
+   Done; see "Geology proxies and rock classification" in the version one schema.
 5. Add optional complete-result recentering after the coordinate and seam contracts are verified.
 
 The existing `cmd/landmask` reads continental affinity.

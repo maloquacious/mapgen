@@ -11,11 +11,9 @@
 // It also interprets the provisional coast (coast distance and coast chains
 // on a working grid) for automatic placement to use.
 //
-// Features come from an explicit fixture file or from automatic placement,
-// which so far places collision belts with their plateaus and foreland
-// basins, old orogens, and rifts. Active margins, island arcs, faults, rock
-// classification, and recentering are not implemented; the manifest declares
-// rock classification absent.
+// Features come from an explicit fixture file or from automatic placement.
+// Rock classification converts features and provinces to geological proxies
+// and classifies every cell; see rocks.go. Recentering is not implemented.
 package structure
 
 import (
@@ -93,6 +91,9 @@ type Manifest struct {
 	CoastParameters         CoastParams       `json:"coast_parameters"`
 	PlacementParameters     *PlacementParams  `json:"placement_parameters,omitzero"`
 	RockClassification      string            `json:"rock_classification"`
+	RockParameters          *RockParams       `json:"rock_parameters,omitzero"`
+	Rock                    *File             `json:"rock,omitzero"`
+	GeologyFields           []continent.Field `json:"geology_fields,omitzero"`
 	Diagnostics             File              `json:"diagnostics"`
 	Fields                  []continent.Field `json:"fields"`
 }
@@ -108,18 +109,23 @@ type Diagnostics struct {
 	Placed    map[string]int `json:"placed"`
 	Omitted   []string       `json:"omitted"`
 	Warnings  []string       `json:"warnings"`
+	Rocks     *RockSummary   `json:"rocks,omitzero"`
 }
 
 // Result keeps everything in the same coordinates. In Land, 1 is provisional
 // land and 0 provisional ocean; it is placement data, not a final landmask.
 type Result struct {
-	Manifest    Manifest
-	Land        []byte
-	Fields      map[string]*fracture.FractureField
-	Features    *FeatureFile
-	Provinces   *ProvinceFile
-	Owner       []uint32 // province ID of every cell, row-major
-	Coast       *Coast   // working-grid coast; nil in a loaded result
+	Manifest  Manifest
+	Land      []byte
+	Fields    map[string]*fracture.FractureField
+	Features  *FeatureFile
+	Provinces *ProvinceFile
+	Owner     []uint32 // province ID of every cell, row-major
+	// Geology holds the proxy fields and rock noise, by name; Rock holds a
+	// Rock value per cell. Both are nil when rock classification is absent.
+	Geology     map[string]*fracture.FractureField
+	Rock        []byte
+	Coast       *Coast // working-grid coast; nil in a loaded result
 	Diagnostics Diagnostics
 }
 
@@ -240,6 +246,14 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 			return nil, err
 		}
 	}
+	rp := DefaultRockParams()
+	geo, err := classifyRocks(ctx, seed, rp, g, ff, r.Provinces, r.Owner, r.Coast)
+	if err != nil {
+		return nil, err
+	}
+	r.Manifest.RockClassification, r.Manifest.RockParameters = RockAlgorithm, &rp
+	r.Geology, r.Rock = geo.fields, geo.rock
+	r.Diagnostics.Rocks = summarizeRocks(land, geo.rock)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -286,6 +300,28 @@ func Write(ctx context.Context, dir string, r *Result, previewScale int) error {
 		}
 		m.Fields = append(m.Fields, field)
 	}
+	m.GeologyFields, m.Rock = nil, nil
+	if r.Rock != nil {
+		for _, name := range GeologyFields {
+			f := r.Geology[name]
+			if f == nil || f.Columns != g.Columns || f.Rows != g.Rows {
+				return fmt.Errorf("geology field %q is missing or does not match the grid", name)
+			}
+			field, err := continent.WriteField(tmp, name, geologyDescriptions[name], f)
+			if err != nil {
+				return err
+			}
+			m.GeologyFields = append(m.GeologyFields, field)
+		}
+		if len(r.Rock) != g.Columns*g.Rows {
+			return fmt.Errorf("rock raster does not match the grid")
+		}
+		m.Rock = &File{File: RockFile, Format: "uint8", SHA256: checksum(r.Rock),
+			Description: "row-major; 0=unclassified, 1=sedimentary, 2=igneous, 3=metamorphic"}
+		if err := os.WriteFile(filepath.Join(tmp, RockFile), r.Rock, 0o644); err != nil {
+			return err
+		}
+	}
 	if len(r.Land) != g.Columns*g.Rows || len(r.Owner) != len(r.Land) {
 		return fmt.Errorf("provisional mask or province ownership does not match the grid")
 	}
@@ -331,6 +367,11 @@ func Write(ctx context.Context, dir string, r *Result, previewScale int) error {
 	if previewScale > 0 {
 		if err := writePreview(ctx, filepath.Join(tmp, PreviewFile), r, previewScale); err != nil {
 			return err
+		}
+		if r.Rock != nil {
+			if err := writeRockPreview(filepath.Join(tmp, RockPreviewFile), r, previewScale); err != nil {
+				return err
+			}
 		}
 		if r.Coast != nil {
 			if err := writeCoastPreview(filepath.Join(tmp, CoastPreviewFile), r.Domain(), r.Coast); err != nil {
@@ -447,5 +488,67 @@ func Load(ctx context.Context, dir string) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Result{Manifest: m, Land: land, Fields: fields, Features: ff, Provinces: &pf, Owner: owner, Diagnostics: d}, nil
+	r := &Result{Manifest: m, Land: land, Fields: fields, Features: ff, Provinces: &pf, Owner: owner, Diagnostics: d}
+	switch m.RockClassification {
+	case Absent:
+		if m.Rock != nil || m.GeologyFields != nil || m.RockParameters != nil {
+			return nil, fmt.Errorf("rock classification is absent but rock data is listed")
+		}
+	case RockAlgorithm:
+		if err := loadRocks(ctx, dir, r, read); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unsupported rock classification %q", m.RockClassification)
+	}
+	return r, nil
+}
+
+// loadRocks reads the geology fields and rock raster of a classified
+// artifact, and checks every cell's rock against its saved proxies.
+func loadRocks(ctx context.Context, dir string, r *Result, read func(File, string) ([]byte, error)) error {
+	m := &r.Manifest
+	p := m.RockParameters
+	if m.Rock == nil || p == nil || p.Algorithm != RockAlgorithm || p.Proxy != ProxyAlgorithm {
+		return fmt.Errorf("rock classification %s is missing its raster or parameters", RockAlgorithm)
+	}
+	if len(m.GeologyFields) != len(GeologyFields) {
+		return fmt.Errorf("geology fields do not match %v", GeologyFields)
+	}
+	cm := &continent.Manifest{Grid: m.Grid, Fields: m.GeologyFields}
+	r.Geology = map[string]*fracture.FractureField{}
+	for i, name := range GeologyFields {
+		fd := m.GeologyFields[i]
+		if fd.Name != name || fd.File != name+".f32" || fd.Columns != m.Grid.Columns || fd.Rows != m.Grid.Rows {
+			return fmt.Errorf("invalid geology field %q", fd.Name)
+		}
+		f, err := continent.ReadField(dir, cm, name)
+		if err != nil {
+			return err
+		}
+		for _, v := range f.Values {
+			if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+				return fmt.Errorf("nonfinite value in %s", name)
+			}
+		}
+		r.Geology[name] = f
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
+	rock, err := read(*m.Rock, RockFile)
+	if err != nil {
+		return err
+	}
+	if len(rock) != len(r.Land) {
+		return fmt.Errorf("rock raster size mismatch")
+	}
+	pr, sh, ig, rv := r.Geology[FieldPressure].Values, r.Geology[FieldShear].Values, r.Geology[FieldIgneous].Values, r.Geology[FieldRockNoise].Values
+	for i, v := range rock {
+		if Rock(v) != ClassifyRock(*p, float64(pr[i]), float64(sh[i]), float64(ig[i]), float64(rv[i])) {
+			return fmt.Errorf("rock raster does not match the saved proxies at cell %d", i)
+		}
+	}
+	r.Rock = rock
+	return nil
 }

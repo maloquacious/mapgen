@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Command structure writes a geological structure artifact from a
-// continental artifact and a feature fixture.
+// continental artifact: features from a fixture or placed automatically,
+// provinces, and rock classification.
 //
 //	structure --in tmp/continents --features fixture.json --out tmp/structure
 package main
