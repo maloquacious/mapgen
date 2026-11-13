@@ -228,10 +228,10 @@ func TestGenerateRejects(t *testing.T) {
 	in := continents(t)
 	o := structure.Options{In: in, Fraction: 0.325, Version: "test"}
 	// Without a fixture, features are placed automatically. This world is
-	// too small for any, and says so.
+	// too small for any belt, and says so; a fault fits.
 	if r, err := structure.Generate(t.Context(), o); err != nil {
 		t.Errorf("without a fixture: %v", err)
-	} else if m, d := r.Manifest, r.Diagnostics; m.Mode != structure.ModeAutomatic || m.PlacementParameters == nil || m.FeatureCount != 0 || len(d.Omitted) != 2 {
+	} else if m, d := r.Manifest, r.Diagnostics; m.Mode != structure.ModeAutomatic || m.PlacementParameters == nil || m.FeatureCount != d.Placed[structure.TypeFault] || m.FeatureCount+len(d.Omitted) != 4 {
 		t.Errorf("without a fixture: mode %q, %d features, omitted %v", m.Mode, m.FeatureCount, d.Omitted)
 	}
 	o.Features = fixture(t)

@@ -41,7 +41,8 @@ func TestPlacement(t *testing.T) {
 	dom, c := testWorld(t, 150, 90)
 	p := DefaultPlacementParams()
 	fs, d := placeTest(t, 7, dom, c)
-	if want := map[string]int{FamilyCollision: 3, FamilyOldOrogen: 5, FamilyRift: 2}; !reflect.DeepEqual(d.Requested, want) {
+	want := map[string]int{FamilyCollision: 3, FamilyActiveMargin: 3, FamilyOldOrogen: 5, FamilyRift: 2, FamilyIslandArc: 2, FamilyFault: 4}
+	if !reflect.DeepEqual(d.Requested, want) {
 		t.Fatalf("requested %v, want %v", d.Requested, want)
 	}
 	ff := &FeatureFile{Format: FeaturesFormat, Domain: dom, Features: fs}
@@ -64,22 +65,44 @@ func TestPlacement(t *testing.T) {
 		if !f.Linear() {
 			count[f.Type]++
 			parent := fs[f.Parent-1]
-			if parent.Kind != "collision" || f.Parent >= f.ID {
-				t.Errorf("feature %d: parent %d is not an earlier collision belt", f.ID, f.Parent)
+			if parent.Kind != "collision" && parent.Kind != "active_margin" || f.Parent >= f.ID {
+				t.Errorf("feature %d: parent %d is not an earlier collision belt or active margin", f.ID, f.Parent)
 			}
-			if (f.Type == TypePlateau) != (f.Side == parent.ElevatedFlank) {
+			// A plateau lies on the elevated flank and a collision belt's
+			// basin opposite it; a margin's basin lies inland, which is
+			// its elevated flank.
+			if (f.Type == TypePlateau || parent.Kind == "active_margin") != (f.Side == parent.ElevatedFlank) {
 				t.Errorf("feature %d: %s on the %s of a belt elevated on the %s", f.ID, f.Type, f.Side, parent.ElevatedFlank)
 			}
 			continue
 		}
 		family, fp := FamilyRift, p.Rift
-		switch f.Kind {
-		case "collision":
+		switch {
+		case f.Kind == "collision":
 			family, fp = FamilyCollision, p.Collision
-		case "old_orogen":
+		case f.Kind == "old_orogen":
 			family, fp = FamilyOldOrogen, p.OldOrogen
+		case f.Kind == "active_margin":
+			family, fp = FamilyActiveMargin, p.ActiveMargin
+		case f.Type == TypeIslandArc:
+			family, fp = FamilyIslandArc, p.IslandArc
+		case f.Type == TypeFault:
+			family, fp = FamilyFault, p.Fault
 		}
 		count[family]++
+		if family == FamilyActiveMargin {
+			// The elevated flank is the inland one. The world has one
+			// continent, so the coast is the major coast.
+			m := f.Backbone[len(f.Backbone)/2]
+			a, z := f.Backbone[len(f.Backbone)/2-1], f.Backbone[len(f.Backbone)/2+1]
+			tx, ty := z.X-a.X, z.Y-a.Y
+			l := math.Hypot(tx, ty)
+			right := c.DistanceAt(Point{m.X - ty/l*m.WidthKM/2, m.Y + tx/l*m.WidthKM/2})
+			left := c.DistanceAt(Point{m.X + ty/l*m.WidthKM/2, m.Y - tx/l*m.WidthKM/2})
+			if (right > left) != (f.ElevatedFlank == "right") {
+				t.Errorf("feature %d: elevated on the %s, with the coast %v km to the left and %v km to the right", f.ID, f.ElevatedFlank, left, right)
+			}
+		}
 		l := NewLine(dom, f.Backbone)
 		// Smoothing shortens a backbone a little.
 		if got := l.Length(); got < 0.9*fp.LengthKM[0] || got > fp.LengthKM[1] {
@@ -90,8 +113,22 @@ func TestPlacement(t *testing.T) {
 			t.Errorf("feature %d: %s is %v km wide", f.ID, family, wide)
 		}
 		for k, s := range f.Backbone {
+			got := c.DistanceAt(Point{s.X, s.Y})
+			switch family {
+			case FamilyIslandArc:
+				// Offshore, in the corridor. Smoothing moves a sample a
+				// little, so allow some slack beyond the drift.
+				if got > -(p.ArcOffsetKM[0]-p.DriftKM-25) || got < -(p.ArcOffsetKM[1]+p.DriftKM+25) {
+					t.Errorf("feature %d sample %d: arc %v km from the coast", f.ID, k, got)
+				}
+				continue
+			case FamilyActiveMargin:
+				if got > max(p.MarginOffsetKM[1], wide/2)+p.DriftKM+25 {
+					t.Errorf("feature %d sample %d: margin %v km from the coast", f.ID, k, got)
+				}
+			}
 			// Inland, with room for at least the end width.
-			if got, floor := c.DistanceAt(Point{s.X, s.Y}), 0.8*p.EndWidth*s.WidthKM/2; got < floor {
+			if floor := 0.8 * p.EndWidth * s.WidthKM / 2; got < floor {
 				t.Errorf("feature %d sample %d: %v km from the coast, width %v", f.ID, k, got, s.WidthKM)
 			}
 			if s.WidthKM < 0.99*p.EndWidth*wide/(1+1e-9) && s.WidthKM < p.EndWidth*fp.WidthKM[0] {
@@ -114,14 +151,15 @@ func TestPlacement(t *testing.T) {
 			t.Errorf("%s: %d placed of %d requested; omitted:\n%s", family, count[family], n, omitted)
 		}
 	}
-	if count[FamilyCollision] == 0 || count[FamilyOldOrogen] == 0 || count[TypePlateau] == 0 || count[TypeBasin] == 0 {
+	if count[FamilyCollision] == 0 || count[FamilyOldOrogen] == 0 || count[TypePlateau] == 0 || count[TypeBasin] == 0 ||
+		count[FamilyActiveMargin] == 0 || count[FamilyIslandArc] == 0 || count[FamilyFault] == 0 {
 		t.Errorf("placed %v on a continent with room for every family", count)
 	}
 	// Unrelated features do not overlap; a plateau or basin may overlap
-	// only its parent.
+	// only its parent, and a fault may cross anything.
 	for i := range fs {
 		for j := i + 1; j < len(fs); j++ {
-			if fs[j].Parent == fs[i].ID || fs[i].Parent != 0 && fs[i].Parent == fs[j].Parent {
+			if fs[i].Type == TypeFault || fs[j].Type == TypeFault || fs[j].Parent == fs[i].ID || fs[i].Parent != 0 && fs[i].Parent == fs[j].Parent {
 				continue
 			}
 			for cell := range covers[i] {
@@ -148,7 +186,8 @@ func TestPlacementRepeats(t *testing.T) {
 
 func TestPlacementWithoutRoom(t *testing.T) {
 	// No land, and land too small for any belt: every request is omitted
-	// after a bounded number of attempts, and nothing is invented.
+	// after a bounded number of attempts, and nothing is invented. A fault
+	// is short enough to fit the island.
 	g := continent.Grid{Columns: 40, Rows: 20, CellWidthKM: 50, CellHeightKM: 50, WidthKM: 2000, HeightKM: 1000}
 	for name, mask := range map[string][]byte{"ocean": make([]byte, 800), "island": boxes(40, 20, [4]int{10, 5, 17, 12}), "land": boxes(40, 20, [4]int{0, 0, 39, 19})} {
 		c, err := interpretCoast(t.Context(), DefaultCoastParams(), g, mask)
@@ -164,8 +203,15 @@ func TestPlacementWithoutRoom(t *testing.T) {
 		if err := ff.Validate(ff.Domain); err != nil {
 			t.Errorf("%s: %v", name, err)
 		}
-		// One collision belt and one old orogen are always requested.
-		if name != "land" && (len(fs) != 0 || len(d.Omitted) != 2) {
+		// One collision belt, active margin, old orogen, and fault are
+		// always requested.
+		faults := 0
+		for _, f := range fs {
+			if f.Type == TypeFault {
+				faults++
+			}
+		}
+		if name != "land" && (len(fs) != faults || faults+len(d.Omitted) != 4 || name == "ocean" && faults != 0) {
 			t.Errorf("%s: %d features, omitted %v", name, len(fs), d.Omitted)
 		}
 	}

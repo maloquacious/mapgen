@@ -16,11 +16,10 @@ go run ./cmd/structure --in tmp/c96 --features internal/structure/testdata/fixtu
 ```
 
 The design is in [Structure Generation Design.md](<../../Structure Generation Design.md>).
-This covers implementation steps 1 and 2 of that design, and the first two parts of step 3: feature records, geometry queries, artifact storage, fixture input, provinces, the coast interpretation, and automatic placement of inland features.
+This covers implementation steps 1 to 3 of that design: feature records, geometry queries, artifact storage, fixture input, provinces, the coast interpretation, and automatic placement.
 
 ## Not implemented yet
 
-- Automatic placement of active margins, island arcs, and faults.
 - Rock classification. The manifest records it as `absent`.
 - `--recenter` and `--config`.
 
@@ -39,11 +38,13 @@ This covers implementation steps 1 and 2 of that design, and the first two parts
 
 ## Automatic placement
 
-Without `--features` the command places collision belts, each with a plateau on one flank and a foreland basin on the other, then old orogens, then rifts.
-The number of each scales with the provisional land area; on the full-size seed 42 map that is 7 collision belts, 13 old orogens, and 6 rifts.
-Belts stay inland, narrow where the land narrows, keep 100 km clear of one another, and do not hook back on themselves.
+Without `--features` the command places, in this order: collision belts, each with a plateau on one flank and a foreland basin on the other; active margins, about half with an inland basin; old orogens; rifts; island arcs; and faults.
+The number of each scales with the provisional land area; on the full-size seed 42 map that is 7 collision belts, 9 active margins (8 found room), 13 old orogens, 6 rifts, 5 island arcs, and 10 faults.
+Inland belts stay inland, narrow where the land narrows, and do not hook back on themselves.
+An active margin follows the coast of a large landmass facing an ocean, 50 to 200 km inland; an island arc follows such a coast 200 to 600 km offshore.
+Features keep 100 km clear of one another, except faults, which may cross anything.
 Each request gets at most 32 candidates; one that cannot be placed is listed under `omitted` in `diagnostics.json` with the reasons, and printed.
-A world too small for a belt gets none.
+A world too small for a belt gets none; a fault needs only 300 km of land.
 The rules and parameters are in the design under "Automatic placement"; the manifest records the parameters as `placement_parameters`.
 
 ## Fixtures

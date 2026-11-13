@@ -106,14 +106,20 @@ func (c *Coast) Summary() *CoastSummary {
 // DistanceAt returns the coast distance at p, interpolated between working
 // cell centers on the torus.
 func (c *Coast) DistanceAt(p Point) float64 {
+	if len(c.Chains) == 0 {
+		return c.Distance[0] // infinite everywhere; do not interpolate
+	}
+	return c.sample(c.Distance, p)
+}
+
+// sample interpolates a working-grid field at p, between cell centers on
+// the torus.
+func (c *Coast) sample(field []float64, p Point) float64 {
 	fx, fy := p.X/c.CellWidthKM-0.5, p.Y/c.CellHeightKM-0.5
 	x0, y0 := math.Floor(fx), math.Floor(fy)
 	tx, ty := fx-x0, fy-y0
 	at := func(dx, dy int) float64 {
-		return c.Distance[((int(y0)+dy)%c.Rows+c.Rows)%c.Rows*c.Columns+((int(x0)+dx)%c.Columns+c.Columns)%c.Columns]
-	}
-	if len(c.Chains) == 0 {
-		return at(0, 0) // infinite everywhere; do not interpolate
+		return field[((int(y0)+dy)%c.Rows+c.Rows)%c.Rows*c.Columns+((int(x0)+dx)%c.Columns+c.Columns)%c.Columns]
 	}
 	return (at(0, 0)*(1-tx)+at(1, 0)*tx)*(1-ty) + (at(0, 1)*(1-tx)+at(1, 1)*tx)*ty
 }

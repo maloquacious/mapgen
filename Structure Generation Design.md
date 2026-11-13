@@ -423,7 +423,7 @@ The working mask, coast distance, and chains are placement data: they are rebuil
 `diagnostics.json` lists the working grid and every chain's summary, and `preview-coast.png` shows the distance in 100 km bands with the smoothed chains.
 The manifest records the parameters as `coast_parameters` with algorithm `coast-v1`.
 
-Which chains are eligible for active margins and island arcs is a placement decision, made in step 3.
+Which coasts are eligible for active margins and island arcs is a placement decision; see "The major coast" under automatic placement.
 
 ### Automatic placement
 
@@ -431,20 +431,22 @@ Without `--features`, features are placed automatically and the manifest's `mode
 The manifest records the parameters as `placement_parameters` with algorithm `placement-v1`.
 The resulting `features.json` is a valid fixture and reproduces the same features.
 
-So far placement covers the inland families.
-Active margins, island arcs, and faults are not placed yet.
-
 **Requests.**
-Each family requests one event per so much provisional land: collision belts one per 35 million square km and at least one, old orogens one per 20 and at least one, rifts one per 45.
-Families are placed in the order collision, old orogen, rift, so the larger and more constrained events choose first.
+Each family requests one event per so much provisional land, in million square km: collision belts one per 35 and at least one, active margins one per 30 and at least one, old orogens one per 20 and at least one, rifts one per 45, island arcs one per 50, and faults one per 25 and at least one.
+The fault count is this design's own starting value; the cylindrical specification gives none.
+Families are placed in the order collision, active margin, old orogen, rift, island arc, fault, so the larger and more constrained events choose first.
 
 | Family | Length, km | Width at the middle, km | Other |
 | --- | --- | --- | --- |
 | Collision | 1,500–5,000 | 300–1,200 | Maturity 0–0.3; elevated flank drawn left or right |
+| Active margin | 1,500–6,000 | 100–400 | Maturity 0–0.4; elevated flank inland |
 | Old orogen | 1,000–3,500 | 100–600 | Maturity 0.6–1; no elevated flank |
 | Rift | 800–3,000 | 50–300 | Axis fraction 0.2–0.4 |
+| Island arc | 600–2,500 | 30–150 | |
+| Fault | 300–2,000 | 20–100 | Sense: half strike-slip, a quarter normal, a quarter thrust |
 
-**Backbone.**
+**Inland backbone.**
+Collision belts, old orogens, rifts, and faults are grown this way.
 A candidate starts at a random working cell that is free and far enough inland for the family's narrowest width, with a random heading.
 Its width at the middle is drawn between the family's minimum and the smaller of the family's maximum and twice the coast distance at the anchor.
 It grows from both ends in 50 km steps to the requested length, or until both ends are blocked.
@@ -461,6 +463,32 @@ A candidate is rejected if its backbone crosses itself or if its envelope, widen
 Each request has at most 32 candidates.
 A request with none accepted is recorded in the diagnostics as an omission with a count of each reason for rejection.
 
+**Faults.**
+A fault is grown like an inland backbone, with three differences.
+It may start in any working cell at least 50 km inland and may cross other features, since it is a structural line and not a range.
+Neither half turns more than 20 degrees from its starting heading, so it is nearly straight.
+It claims no room, so nothing avoids it; faults are placed last.
+
+**The major coast.**
+Active margins and island arcs are placed against the major coast, not the whole provisional coast.
+Starting from the working mask, every water region under 2 million square km becomes land, then every landmass under 1 million square km becomes water.
+What remains is mainland facing ocean.
+The major coast distance is the signed distance to that coast, measured as coast distance is: positive on the mainland side.
+So an enclosed sea has no active margin and no arc, a small island has no active margin, and offshore islands do not disturb the line a margin or arc follows.
+
+**Coastal backbone.**
+An active margin draws its width, then an offset from the major coast between 50 and 200 km and never less than half its width.
+An island arc draws its width and an offset between 200 and 600 km offshore.
+A candidate starts in a random free working cell whose major coast distance is within half a cell of the offset, heading along the contour of that distance in one direction or the other.
+At each 50 km step it takes, from five turns no tighter than the bend limit, the one that best keeps the major coast distance 100 km ahead at the offset.
+An end is blocked where that distance strays more than 100 km from the offset, where another feature lies, or where the backbone would come within 300 km or its own width of itself.
+A margin must also stay on provisional land with room for its end width; an arc need not avoid small islands.
+Neither half of a margin may turn more than 90 degrees from its starting heading; an arc is held to the inland limit of 60.
+Length, smoothing, widths, and the checks on the finished candidate are as for an inland backbone, except that an arc's width is not limited by the coast.
+
+A margin's elevated flank is its inland one: the side farther from the major coast.
+Half the margins, by a request attribute, get an inland basin on that side, built like a foreland basin; one with no room is omitted and recorded.
+
 **Plateau and foreland basin.**
 A collision belt gets a plateau on its elevated flank and a foreland basin on the other.
 Each is an outline beside the middle of the belt: its inner edge runs inside the belt so the two blend, and its outer edge reaches up to 0.5–1 belt widths (plateau) or 0.4–0.8 (basin) beyond the belt's edge, deepest in the middle.
@@ -470,6 +498,9 @@ A plateau or basin that reaches less than 50 km on average, is not a simple outl
 
 **Targets.**
 Targets are fixed by family from the cylindrical specification's ranges: collision belts 1,500–3,000 m regional elevation and 2,500–5,000 m relief; plateaus 2,500–4,500 m and 200–800 m; foreland basins 0–400 m and 0–200 m; rifts 300–1,500 m and 500–2,000 m; old orogens 300–1,200 m with relief from 500 m up to 2,500 m for the least mature and 1,000 m for the most.
+Active margins have 1,000–2,500 m and 2,000–4,000 m, and their inland basins the foreland values.
+Island arcs have −1,500 to 500 m regional elevation, so they cross sea level, and 1,000–3,000 m relief; these two ranges are this design's own starting values.
+Faults carry no targets.
 
 ### Geometry queries
 
@@ -543,7 +574,8 @@ Evaluate structural placement before adding terrain noise.
 2. Add provisional coast interpretation and province ownership.
    Component labels and provinces are done.
 3. Add bounded, seeded automatic event placement and diagnostic previews.
-   It is built in three parts: coast distance and coast chains (done); inland features, which are collision belts with their plateaus and basins, old orogens, and rifts (done); and coastal features, which are active margins, island arcs, and faults.
+   Done, in three parts: coast distance and coast chains; inland features, which are collision belts with their plateaus and basins, old orogens, and rifts; and coastal features, which are active margins, island arcs, and faults.
+   Not yet placed: interrupted old belts, and intermontane and interior basins.
 4. Specify geological proxy conversion and implement rock classification as its own deterministic substep.
 5. Add optional complete-result recentering after the coordinate and seam contracts are verified.
 
