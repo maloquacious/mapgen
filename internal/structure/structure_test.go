@@ -97,7 +97,7 @@ func TestRoundTrip(t *testing.T) {
 	sameFiles(t, before, files(t, in))
 
 	got := files(t, first)
-	for _, name := range []string{"manifest.json", "features.json", "diagnostics.json", "provinces.json", "provinces.u32", "provisional-land.u8", "affinity.f32", "continental.f32", "coast.f32", "preview.png"} {
+	for _, name := range []string{"manifest.json", "features.json", "diagnostics.json", "provinces.json", "provinces.u32", "provisional-land.u8", "affinity.f32", "continental.f32", "coast.f32", "preview.png", "preview-coast.png"} {
 		if _, ok := got[name]; !ok {
 			t.Errorf("missing %s", name)
 		}

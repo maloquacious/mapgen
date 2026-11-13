@@ -302,10 +302,12 @@ func chooseSeeds(seed uint64, g continent.Grid, c *components, n, k int, spacing
 // sedimentary; a landmass that is a single province is shield when its mean
 // is at least the mean over all land. A seeded draw then makes a few
 // provinces volcanic.
-func buildProvinces(ctx context.Context, seed uint64, p ProvinceParams, g continent.Grid, land []byte, continental []float32) (*ProvinceFile, []uint32, error) {
+//
+// mask and c are the simplified provisional mask and its regions, from
+// simplify.
+func buildProvinces(ctx context.Context, seed uint64, p ProvinceParams, g continent.Grid, mask []byte, c *components, continental []float32) (*ProvinceFile, []uint32, error) {
 	cols, rows := g.Columns, g.Rows
 	cellKM2 := g.CellWidthKM * g.CellHeightKM
-	mask, c := simplifyMask(land, cols, rows, int(math.Ceil(p.MinAreaKM2/cellKM2)))
 	center := func(cell int32) Point {
 		return Point{(float64(int(cell)%cols) + 0.5) * g.CellWidthKM, (float64(int(cell)/cols) + 0.5) * g.CellHeightKM}
 	}
@@ -333,7 +335,7 @@ func buildProvinces(ctx context.Context, seed uint64, p ProvinceParams, g contin
 			return nil, nil, err
 		}
 	}
-	owner := make([]uint32, len(land))
+	owner := make([]uint32, len(mask))
 	for i, l := range c.label {
 		owner[i] = whole[l]
 	}
@@ -420,6 +422,11 @@ func touched(dom Domain, cols, rows int, s Shape, owner []uint32) []uint32 {
 	}
 	slices.Sort(ids)
 	return ids
+}
+
+// simplify applies simplifyMask with the province parameters' minimum area.
+func simplify(p ProvinceParams, g continent.Grid, land []byte) ([]byte, *components) {
+	return simplifyMask(land, g.Columns, g.Rows, int(math.Ceil(p.MinAreaKM2/(g.CellWidthKM*g.CellHeightKM))))
 }
 
 // validate checks a loaded province file against its ownership raster.

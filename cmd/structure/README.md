@@ -8,13 +8,12 @@ go run ./cmd/structure --in tmp/continents --features internal/structure/testdat
 ```
 
 The design is in [Structure Generation Design.md](<../../Structure Generation Design.md>).
-This covers implementation steps 1 and 2 of that design: feature records, geometry queries, artifact storage, fixture input, and provinces.
+This covers implementation steps 1 and 2 of that design, and the first part of step 3: feature records, geometry queries, artifact storage, fixture input, provinces, and the coast interpretation that automatic placement will use.
 
 ## Not implemented yet
 
 - Automatic placement. `--features` is required; without it the command fails.
 - Rock classification. The manifest records it as `absent`.
-- Coast chains and coast distance, which arrive with automatic placement.
 - `--recenter` and `--config`.
 
 ## Flags
@@ -26,8 +25,8 @@ This covers implementation steps 1 and 2 of that design: feature records, geomet
 | `--features` | Feature fixture file, in the `mapgen-structure-features-v1` schema |
 | `--seed` | Structure seed, unsigned 64-bit. If omitted, the continental input's seed is used; the manifest records the seed and which of the two it was. It decides province seeds, boundaries, and volcanic draws |
 | `--provisional-land-fraction` | Fraction of cells treated as land while placing features; default 0.325 |
-| `--png` | Write `preview.png`; default true |
-| `--png-scale` | Preview sampling interval in cells; default 1 |
+| `--png` | Write `preview.png` and `preview-coast.png`; default true |
+| `--png-scale` | Sampling interval in cells for `preview.png`; default 1. `preview-coast.png` has its own scale |
 | `--version` | Print the generator version |
 
 ## Fixtures
@@ -47,9 +46,14 @@ The `features.json` of any structure artifact is itself a valid fixture for the 
 - `provisional-land.u8`: one byte per cell, 1 for provisional land. This is placement data, not the final landmask.
 - `provinces.json` and `provinces.u32`: the geological provinces and the province ID of every cell, as little-endian uint32. Every cell has an owner. Islands and enclosed waters under 20,000 square km belong to the province around them.
 - `affinity.f32`, `continental.f32`, `coast.f32`: retained continental fields.
-- `diagnostics.json`: features placed per type, omissions, and warnings. The only warning so far is a backbone that crosses itself.
+- `diagnostics.json`: the coast interpretation, features placed per type, omissions, and warnings. The only warning so far is a backbone that crosses itself.
+  The coast section gives the working grid (about 50 km per cell), the greatest distance from the coast inland and offshore, and every coast chain: its length, the land and water areas it separates, and whether it circles the world.
 - `manifest.json`: format and generator version, the input manifest and its checksum, seed, grid, provisional selection, what is absent, and checksums for every saved file. Input and fixture paths are not recorded.
 - `preview.png`: provinces in pale tones by type (shield tan, sedimentary green, volcanic pink, oceanic blue) with their boundaries, the provisional coast in grey, each feature's envelope tinted by type, and backbones as dark lines.
+
+- `preview-coast.png`: distance from the provisional coast in 100 km bands, tan inland and blue offshore, darker farther away, with the smoothed coast chains as dark lines. It is drawn from the working grid, at least 1200 pixels wide.
+
+Coast distance and coast chains are placement data. They are rebuilt from the provisional mask on each run and are not saved as rasters; islands and enclosed waters under 20,000 square km are not coastlines.
 
 The world is a torus at this stage: both axes wrap, and features may cross either seam.
 `internal/structure.Load` reads and verifies an artifact without the original continental directory.

@@ -40,6 +40,13 @@ func TestCommand(t *testing.T) {
 	if got.Manifest.Seed != 9 || got.Manifest.FeatureCount != 7 {
 		t.Errorf("manifest: seed %d, %d features", got.Manifest.Seed, got.Manifest.FeatureCount)
 	}
+	// 576 x 288 km at a 50 km working spacing.
+	if c := got.Diagnostics.Coast; c == nil || c.Columns != 12 || c.Rows != 6 || len(c.Chains) == 0 {
+		t.Errorf("coast diagnostics: %+v", c)
+	}
+	if _, err := os.Stat(filepath.Join(out, structure.CoastPreviewFile)); err != nil {
+		t.Error(err)
+	}
 	f, err := os.Open(filepath.Join(out, structure.PreviewFile))
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +69,9 @@ func TestCommand(t *testing.T) {
 	if err := run(t.Context(), []string{"--in", in, "--out", noPreview, "--features", fixture, "--png=false"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(noPreview, structure.PreviewFile)); !os.IsNotExist(err) {
-		t.Error("wrote a preview with --png=false")
+	for _, name := range []string{structure.PreviewFile, structure.CoastPreviewFile} {
+		if _, err := os.Stat(filepath.Join(noPreview, name)); !os.IsNotExist(err) {
+			t.Errorf("wrote %s with --png=false", name)
+		}
 	}
 }

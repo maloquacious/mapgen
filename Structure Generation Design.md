@@ -395,6 +395,32 @@ Provinces follow these rules, named `provinces-v1`. Their numeric values are cal
 
 Province IDs run from 1: landmasses in order, each landmass's provinces in seed order, then ocean regions in order.
 
+### Coast interpretation
+
+The coast is interpreted on a working grid: the grid nearest 50 km per cell that tiles the world.
+A working cell is land when at least half of the simplified provisional mask inside it is land.
+The simplified mask is the one provinces use, so islands and enclosed waters under the province minimum area are not coastlines.
+
+Coast distance is the signed distance in kilometers from a working cell center to the nearest land/water interface of the working mask: positive on land, negative on water.
+It is exact on the torus, not a graph approximation; the interface is the cell edges between land and water, so the distance is half a cell at a coastal cell center.
+Between cell centers it is interpolated.
+A world that is all land or all ocean has no coast: the distance is infinite and there are no chains.
+
+A coast chain is one closed coastline of the working mask.
+Every coastline on a torus is closed.
+Walking a chain's points in order keeps land on the right, by the same rule belts use for sides.
+Where two land cells touch only at a corner the chain keeps them joined, matching the eight-connected land and four-connected water of the region labels.
+A chain's points are the midpoints of its cell edges, smoothed along the chain with a standard deviation of 75 km, and unwrapped on both axes.
+A chain records its length, the areas of the working-grid land region and water region it separates, and how many times it circles the world before closing.
+A band of land right round the world has two chains that close only by wrapping.
+
+Chains are numbered in order of each chain's first edge in row-major order.
+The working mask, coast distance, and chains are placement data: they are rebuilt from the provisional mask and are not saved as rasters.
+`diagnostics.json` lists the working grid and every chain's summary, and `preview-coast.png` shows the distance in 100 km bands with the smoothed chains.
+The manifest records the parameters as `coast_parameters` with algorithm `coast-v1`.
+
+Which chains are eligible for active margins and island arcs is a placement decision, made in step 3.
+
 ### Geometry queries
 
 These are the handoff to terrain.
@@ -465,8 +491,9 @@ Evaluate structural placement before adding terrain noise.
 1. Define feature records, physical geometry queries, artifact storage, and an explicit fixture input.
    Prove the handoff to terrain on fixed features before tuning automatic placement.
 2. Add provisional coast interpretation and province ownership.
-   Component labels and provinces are done; coast chains and coast distance wait for step 3, where margin and arc placement define what they must provide.
+   Component labels and provinces are done.
 3. Add bounded, seeded automatic event placement and diagnostic previews.
+   It is built in three parts: coast distance and coast chains (done); inland features, which are collision belts and old orogens with their plateaus and basins, then rifts; and coastal features, which are active margins, island arcs, and faults.
 4. Specify geological proxy conversion and implement rock classification as its own deterministic substep.
 5. Add optional complete-result recentering after the coordinate and seam contracts are verified.
 

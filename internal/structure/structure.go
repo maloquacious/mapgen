@@ -8,6 +8,9 @@
 // The domain is a torus. Every stage before climate wraps in both directions
 // so the map can be recentered without breaks.
 //
+// It also interprets the provisional coast (coast distance and coast chains
+// on a working grid) for automatic placement to use.
+//
 // This version accepts features only from an explicit fixture file.
 // Automatic placement, rock classification, and recentering are not
 // implemented; the manifest declares rock classification absent.
@@ -89,6 +92,7 @@ type Manifest struct {
 	ProvinceOwnership       File              `json:"province_ownership"`
 	ProvinceCount           int               `json:"province_count"`
 	ProvinceParameters      ProvinceParams    `json:"province_parameters"`
+	CoastParameters         CoastParams       `json:"coast_parameters"`
 	RockClassification      string            `json:"rock_classification"`
 	Diagnostics             File              `json:"diagnostics"`
 	Fields                  []continent.Field `json:"fields"`
@@ -98,6 +102,7 @@ type Manifest struct {
 // timings, so they are as reproducible as the manifest.
 type Diagnostics struct {
 	Mode     string         `json:"mode"`
+	Coast    *CoastSummary  `json:"coast,omitzero"`
 	Placed   map[string]int `json:"placed"`
 	Omitted  []string       `json:"omitted"`
 	Warnings []string       `json:"warnings"`
@@ -112,6 +117,7 @@ type Result struct {
 	Features    *FeatureFile
 	Provinces   *ProvinceFile
 	Owner       []uint32 // province ID of every cell, row-major
+	Coast       *Coast   // working-grid coast; nil in a loaded result
 	Diagnostics Diagnostics
 }
 
@@ -189,14 +195,22 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 			Grid: g, Topology: Topology, Mode: ModeFixture,
 			ProvisionalLandFraction: o.Fraction, ProvisionalLandCells: k, ProvisionalSelection: Selection,
 			FeatureCount: len(ff.Features), RockClassification: Absent, ProvinceParameters: DefaultProvinceParams(),
+			CoastParameters: DefaultCoastParams(),
 		},
 		Land: land, Fields: fields, Features: ff,
 		Diagnostics: Diagnostics{Mode: ModeFixture, Placed: map[string]int{}, Omitted: []string{}, Warnings: ff.Warnings()},
 	}
-	r.Provinces, r.Owner, err = buildProvinces(ctx, seed, r.Manifest.ProvinceParameters, g, land, fields[continent.FieldContinental].Values)
+	// Provinces and the coast share one simplified mask, so specks and
+	// puddles are neither provinces nor coastlines.
+	mask, regions := simplify(r.Manifest.ProvinceParameters, g, land)
+	r.Provinces, r.Owner, err = buildProvinces(ctx, seed, r.Manifest.ProvinceParameters, g, mask, regions, fields[continent.FieldContinental].Values)
 	if err != nil {
 		return nil, err
 	}
+	if r.Coast, err = interpretCoast(ctx, r.Manifest.CoastParameters, g, mask); err != nil {
+		return nil, err
+	}
+	r.Diagnostics.Coast = r.Coast.Summary()
 	r.Manifest.ProvinceCount = len(r.Provinces.Provinces)
 	// Province IDs in a fixture are not trusted; they are recomputed here.
 	for i := range ff.Features {
@@ -215,7 +229,9 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 
 // Write publishes a complete artifact using a sibling temporary directory.
 // An existing output is rejected so accepted checkpoints are not overwritten.
-// previewScale is 0 to omit the preview, or >=1 to sample every Nth cell.
+// previewScale is 0 to omit the previews, or >=1 to sample every Nth cell in
+// preview.png. The coast preview has its own scale and is written only for a
+// generated result.
 func Write(ctx context.Context, dir string, r *Result, previewScale int) error {
 	if previewScale < 0 {
 		return fmt.Errorf("preview scale must not be negative")
@@ -280,7 +296,7 @@ func Write(ctx context.Context, dir string, r *Result, previewScale int) error {
 	m.Features = File{File: FeaturesFile, Format: FeaturesFormat, SHA256: checksum(features),
 		Description: "authoritative feature records; geometry in km, unwrapped on both axes"}
 	m.Diagnostics = File{File: DiagnosticsFile, Format: "json", SHA256: checksum(diagnostics),
-		Description: "derived placement counts, omissions, and warnings"}
+		Description: "derived coast interpretation, placement counts, omissions, and warnings"}
 	manifest, err := json.Marshal(m, json.Deterministic(true), jsontext.WithIndent("  "))
 	if err != nil {
 		return err
@@ -296,6 +312,11 @@ func Write(ctx context.Context, dir string, r *Result, previewScale int) error {
 	if previewScale > 0 {
 		if err := writePreview(ctx, filepath.Join(tmp, PreviewFile), r, previewScale); err != nil {
 			return err
+		}
+		if r.Coast != nil {
+			if err := writeCoastPreview(filepath.Join(tmp, CoastPreviewFile), r.Domain(), r.Coast); err != nil {
+				return err
+			}
 		}
 	}
 	if err := ctx.Err(); err != nil {

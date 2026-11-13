@@ -128,7 +128,7 @@ func world() (continent.Grid, []byte, []float32) {
 func TestBuildProvinces(t *testing.T) {
 	g, land, values := world()
 	p := DefaultProvinceParams()
-	pf, owner, err := buildProvinces(t.Context(), 1, p, g, land, values)
+	pf, owner, err := provinces(t, 1, p, g, land, values)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,14 +208,14 @@ func TestBuildProvinces(t *testing.T) {
 	}
 
 	// The same seed repeats exactly; another seed moves the boundaries.
-	pf2, owner2, err := buildProvinces(t.Context(), 1, p, g, land, values)
+	pf2, owner2, err := provinces(t, 1, p, g, land, values)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(owner, owner2) || !slices.Equal(pf.Provinces, pf2.Provinces) {
 		t.Error("the same seed gave a different partition")
 	}
-	_, owner3, err := buildProvinces(t.Context(), 2, p, g, land, values)
+	_, owner3, err := provinces(t, 2, p, g, land, values)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ func TestProvincesWithoutCoast(t *testing.T) {
 		for i := range land {
 			land[i] = kind
 		}
-		pf, owner, err := buildProvinces(t.Context(), 1, DefaultProvinceParams(), g, land, values)
+		pf, owner, err := provinces(t, 1, DefaultProvinceParams(), g, land, values)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -241,4 +241,11 @@ func TestProvincesWithoutCoast(t *testing.T) {
 			t.Errorf("mask of %d: %+v", kind, pf.Provinces)
 		}
 	}
+}
+
+// provinces simplifies land and builds provinces on the result.
+func provinces(t *testing.T, seed uint64, p ProvinceParams, g continent.Grid, land []byte, values []float32) (*ProvinceFile, []uint32, error) {
+	t.Helper()
+	mask, c := simplify(p, g, land)
+	return buildProvinces(t.Context(), seed, p, g, mask, c, values)
 }
