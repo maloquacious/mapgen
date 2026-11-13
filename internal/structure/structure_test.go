@@ -171,7 +171,7 @@ func TestLoad(t *testing.T) {
 		m.RockClassification != structure.RockAlgorithm {
 		t.Errorf("manifest: %+v", m)
 	}
-	if m.FeatureCount != 7 || len(r.Features.Features) != 7 || r.Diagnostics.Placed[structure.TypeBasin] != 2 {
+	if m.FeatureCount != 10 || len(r.Features.Features) != 10 || r.Diagnostics.Placed[structure.TypeBasin] != 3 {
 		t.Errorf("features: %d in manifest, diagnostics %+v", m.FeatureCount, r.Diagnostics)
 	}
 	// Meaningful zeros and the full key range survive storage.
@@ -263,7 +263,7 @@ func TestGenerateRejects(t *testing.T) {
 	// too small for any belt, and says so; a fault fits.
 	if r, err := structure.Generate(t.Context(), o); err != nil {
 		t.Errorf("without a fixture: %v", err)
-	} else if m, d := r.Manifest, r.Diagnostics; m.Mode != structure.ModeAutomatic || m.PlacementParameters == nil || m.FeatureCount != d.Placed[structure.TypeFault] || m.FeatureCount+len(d.Omitted) != 4 {
+	} else if m, d := r.Manifest, r.Diagnostics; m.Mode != structure.ModeAutomatic || m.PlacementParameters == nil || m.FeatureCount != d.Placed[structure.TypeFault] || m.FeatureCount+len(d.Omitted) != 5 {
 		t.Errorf("without a fixture: mode %q, %d features, omitted %v", m.Mode, m.FeatureCount, d.Omitted)
 	}
 	o.Features = fixture(t)
@@ -293,8 +293,11 @@ func TestValidation(t *testing.T) {
 		{"repeated id", `"id": 4,`, `"id": 3,`, "repeated"},
 		{"unknown type", `"type": "fault"`, `"type": "volcano"`, "unknown type"},
 		{"missing key", `"key": "4", `, ``, "key is required"},
-		{"missing parent", `"key": "2", "parent": 1,`, `"key": "2", "parent": 9,`, "does not exist"},
+		{"missing parent", `"key": "2", "parent": 1,`, `"key": "2", "parent": 99,`, "does not exist"},
 		{"wrong parent type", `"key": "2", "parent": 1,`, `"key": "2", "parent": 4,`, "must be a mountain_belt"},
+		{"segment of another kind", `"key": "9", "parent": 8,`, `"key": "9", "parent": 1,`, "same kind"},
+		{"belt with a basin parent", `"key": "9", "parent": 8,`, `"key": "9", "parent": 7,`, "same kind"},
+		{"intermontane without a parent", `"key": "10", "parent": 1,`, `"key": "10",`, "parent must be"},
 		{"plateau on the wrong flank", `"parent": 1, "side": "left"`, `"parent": 1, "side": "right"`, "elevated_flank"},
 		{"basin without a parent", `"kind": "interior"`, `"kind": "foreland"`, "parent must be"},
 		{"missing maturity", `"maturity": 0, `, ``, "maturity is required"},

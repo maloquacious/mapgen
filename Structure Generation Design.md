@@ -281,7 +281,7 @@ Fields common to every feature:
 | `type` | string | `mountain_belt`, `rift`, `island_arc`, `fault`, `plateau`, or `basin` |
 | `name` | string | Optional label for previews and diagnostics; no effect on generation |
 | `key` | string | Unsigned 64-bit decimal; the feature's random key, see below |
-| `parent` | integer | Optional ID of the feature this one is associated with |
+| `parent` | integer | Optional ID of the feature this one is associated with. A `mountain_belt`'s parent is another `mountain_belt` of the same `kind`: the first segment of the interrupted belt they belong to |
 | `provinces` | integer list | Province IDs the feature touches; written on output, recomputed (not trusted) on input |
 | `targets` | object | Optional `[min, max]` ranges in meters: `regional_elevation_m` and `relief_m`; constraints for terrain, with `min <= max` |
 
@@ -314,7 +314,8 @@ Loading a feature file fails, naming the feature ID, when:
 - a number is not finite, a width or `edge_km` is not positive, or a range has `min > max`;
 - a first vertex is not in `[0, width_km)` by `[0, height_km)`, or a segment spans half the world or more on either axis;
 - an outline is not simple, is as wide or as tall as the world, or any geometry has a zero-length segment;
-- a basin's parent is not a `mountain_belt`, `rift`, or `island_arc`.
+- a basin's parent is not a `mountain_belt`, `rift`, or `island_arc`;
+- a `mountain_belt`'s parent is not a `mountain_belt` of the same `kind`.
 
 Self-intersection, tight-bend, and overlap rules belong to automatic placement.
 A fixture that breaks them loads with a recorded warning, so awkward cases can be drawn deliberately.
@@ -347,11 +348,12 @@ All streams use `prng.New(seed, domain, sequence)` with the structure seed and t
 | `structure-v1/place/<family>` | Request index within the family | All candidate attempts for one requested event |
 | `structure-v1/rocks/noise` | Octave number | The fracture field for one octave of rock noise |
 
-Families are `collision` (0), `active_margin` (1), `old_orogen` (2), `rift` (3), `island_arc` (4), and `fault` (5).
+Families are `collision` (0), `active_margin` (1), `old_orogen` (2), `rift` (3), `island_arc` (4), `fault` (5), and `interior_basin` (6).
 The numbers are fixed, so adding a family does not change what the others draw.
 
 An automatically placed feature's `key` is the first value drawn from its placement stream.
-A plateau or basin placed with a belt draws its key from the belt's stream after the belt is placed.
+A plateau or basin placed with a belt, or a later segment of an interrupted belt, draws its key from the belt's stream after the belt is placed.
+An intermontane basin draws its key after the belt's other basins, so their keys do not depend on it.
 A fixture feature's `key` is whatever the file states.
 Terrain derives a feature's detail stream from the terrain seed, a terrain domain, and `key` as the sequence, so changing the terrain seed changes detail in every belt while an unchanged key keeps belts independent of one another.
 
@@ -429,13 +431,14 @@ Which coasts are eligible for active margins and island arcs is a placement deci
 ### Automatic placement
 
 Without `--features`, features are placed automatically and the manifest's `mode` is `automatic`.
-The manifest records the parameters as `placement_parameters` with algorithm `placement-v1`.
+The manifest records the parameters as `placement_parameters` with algorithm `placement-v2`.
+Version 2 added interrupted old orogens, intermontane basins, and interior basins to version 1.
 The resulting `features.json` is a valid fixture and reproduces the same features.
 
 **Requests.**
-Each family requests one event per so much provisional land, in million square km: collision belts one per 35 and at least one, active margins one per 30 and at least one, old orogens one per 20 and at least one, rifts one per 45, island arcs one per 50, and faults one per 25 and at least one.
-The fault count is this design's own starting value; the cylindrical specification gives none.
-Families are placed in the order collision, active margin, old orogen, rift, island arc, fault, so the larger and more constrained events choose first.
+Each family requests one event per so much provisional land, in million square km: collision belts one per 35 and at least one, active margins one per 30 and at least one, old orogens one per 20 and at least one, rifts one per 45, island arcs one per 50, interior basins one per 25 and at least one, and faults one per 25 and at least one.
+The fault and interior basin counts are this design's own starting values; the cylindrical specification gives none.
+Families are placed in the order collision, active margin, old orogen, rift, island arc, interior basin, fault, so the larger and more constrained events choose first.
 
 | Family | Length, km | Width at the middle, km | Other |
 | --- | --- | --- | --- |
@@ -445,6 +448,7 @@ Families are placed in the order collision, active margin, old orogen, rift, isl
 | Rift | 800–3,000 | 50–300 | Axis fraction 0.2–0.4 |
 | Island arc | 600–2,500 | 30–150 | |
 | Fault | 300–2,000 | 20–100 | Sense: half strike-slip, a quarter normal, a quarter thrust |
+| Interior basin | Long axis 400–1,500 | Short axis 300–1,000, no longer than the long axis | |
 
 **Inland backbone.**
 Collision belts, old orogens, rifts, and faults are grown this way.
@@ -469,6 +473,15 @@ A fault is grown like an inland backbone, with three differences.
 It may start in any working cell at least 50 km inland and may cross other features, since it is a structural line and not a range.
 Neither half turns more than 20 degrees from its starting heading, so it is nearly straight.
 It claims no room, so nothing avoids it; faults are placed last.
+
+**Interrupted old orogens.**
+Half the old orogens, by a request attribute, are interrupted: once placed, the backbone is cut into segments with clear ground between them.
+A belt is cut once, or by a second attribute twice; one cut is centered between 35 and 65 percent of the samples, two between 25 and 40 and between 60 and 75 percent.
+A cut removes the samples around its center until the straight distance between the neighboring segment ends, less their half widths, is at least the drawn gap of 100–300 km.
+The width at each cut tapers to the end width over two samples.
+A belt that would leave a segment with fewer than four samples stays whole.
+The segments are saved in order as `old_orogen` belts with the same maturity and targets; each after the first names the first as its `parent`.
+Only the segments claim room, so the gaps are as free as any other ground.
 
 **The major coast.**
 Active margins and island arcs are placed against the major coast, not the whole provisional coast.
@@ -497,9 +510,26 @@ The outer edge is pulled in where it would come within 50 km of the coast (plate
 If the plateau has no room on the drawn flank the other flank is tried, and the belt's `elevated_flank` follows the plateau.
 A plateau or basin that reaches less than 50 km on average, is not a simple outline, or comes within the gap of an unrelated feature is omitted and recorded.
 
+**Intermontane basin.**
+Half the collision belts and active margins at least 250 km wide, by a request attribute, get an intermontane basin: a basin inside the belt's envelope, between its ranges.
+Its side is drawn by another attribute.
+Its outline runs along the middle half of the belt, from 15 percent of the half width out from the backbone to as much as 75 percent, reaching farthest in the middle.
+The outer edge is pulled toward the backbone where it would leave provisional land or reach a feature other than the belt and its plateau and basins.
+It may overlap those features, since it belongs to the same mountain system; it must keep the gap from every other feature.
+One that averages less than 40 km across, or has no room, is omitted and recorded.
+
+**Interior basin.**
+An interior basin is a broad sag in a continental interior, such as an intracratonic basin; it has no parent and no side.
+Its outline is an ellipse of 32 vertices with the drawn axes, a random orientation, and a radius wobbled by up to 8 percent in each of the second and third harmonics.
+A candidate is centered in a random free working cell at least half the short axis inland.
+Each vertex is pulled toward the center, in steps down to 40 percent of its radius, until it lies at least 100 km inland and on a free cell; the radii are then smoothed around the ring without growing.
+A candidate is rejected when a vertex finds no such place, when its mean radius falls below 60 percent of the ellipse's, or when it comes within the gap of another feature.
+Its `edge_km` is 40 percent of its mean radius, between 50 and 250 km, so it deepens gradually.
+
 **Targets.**
 Targets are fixed by family from the cylindrical specification's ranges: collision belts 1,500–3,000 m regional elevation and 2,500–5,000 m relief; plateaus 2,500–4,500 m and 200–800 m; foreland basins 0–400 m and 0–200 m; rifts 300–1,500 m and 500–2,000 m; old orogens 300–1,200 m with relief from 500 m up to 2,500 m for the least mature and 1,000 m for the most.
 Active margins have 1,000–2,500 m and 2,000–4,000 m, and their inland basins the foreland values.
+Intermontane basins have 500–2,000 m and 0–400 m, and interior basins 0–300 m and 0–150 m; these are this design's own starting values.
 Island arcs have −1,500 to 500 m regional elevation, so they cross sea level, and 1,000–3,000 m relief; these two ranges are this design's own starting values.
 Faults carry no targets.
 
@@ -656,8 +686,7 @@ Evaluate structural placement before adding terrain noise.
 2. Add provisional coast interpretation and province ownership.
    Component labels and provinces are done.
 3. Add bounded, seeded automatic event placement and diagnostic previews.
-   Done, in three parts: coast distance and coast chains; inland features, which are collision belts with their plateaus and basins, old orogens, and rifts; and coastal features, which are active margins, island arcs, and faults.
-   Not yet placed: interrupted old belts, and intermontane and interior basins.
+   Done, in four parts: coast distance and coast chains; inland features, which are collision belts with their plateaus and basins, old orogens, and rifts; coastal features, which are active margins, island arcs, and faults; and the remaining kinds, which are interrupted old orogens, intermontane basins, and interior basins.
 4. Specify geological proxy conversion and implement rock classification as its own deterministic substep.
    Done; see "Geology proxies and rock classification" in the version one schema.
 5. Add optional complete-result recentering after the coordinate and seam contracts are verified.

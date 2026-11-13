@@ -41,7 +41,7 @@ func TestPlacement(t *testing.T) {
 	dom, c := testWorld(t, 150, 90)
 	p := DefaultPlacementParams()
 	fs, d := placeTest(t, 7, dom, c)
-	want := map[string]int{FamilyCollision: 3, FamilyActiveMargin: 3, FamilyOldOrogen: 5, FamilyRift: 2, FamilyIslandArc: 2, FamilyFault: 4}
+	want := map[string]int{FamilyCollision: 3, FamilyActiveMargin: 3, FamilyOldOrogen: 5, FamilyRift: 2, FamilyIslandArc: 2, FamilyInteriorBasin: 4, FamilyFault: 4}
 	if !reflect.DeepEqual(d.Requested, want) {
 		t.Fatalf("requested %v, want %v", d.Requested, want)
 	}
@@ -62,6 +62,31 @@ func TestPlacement(t *testing.T) {
 		}
 		keys[*f.Key] = true
 		covers[i] = Cover(dom, c.Columns, c.Rows, f.Shape(dom))
+		if f.Kind == "interior" {
+			// Unparented, inland, and clear of the coast at every vertex.
+			count[FamilyInteriorBasin]++
+			for _, q := range f.Outline {
+				if got := c.DistanceAt(q); got < 0.8*p.InteriorCoastKM {
+					t.Errorf("feature %d: interior basin vertex %v km from the coast", f.ID, got)
+				}
+			}
+			continue
+		}
+		if f.Kind == "intermontane" {
+			// Inside its belt's envelope.
+			count[f.Kind]++
+			parent := fs[f.Parent-1]
+			l := NewLine(dom, parent.Backbone)
+			for _, q := range f.Outline {
+				if u := l.Cross(q); u > 1+1e-6 {
+					t.Errorf("feature %d: intermontane basin vertex at %v half widths from its belt", f.ID, u)
+				}
+			}
+			if parent.Kind != "collision" && parent.Kind != "active_margin" || f.Parent >= f.ID {
+				t.Errorf("feature %d: parent %d is not an earlier collision belt or active margin", f.ID, f.Parent)
+			}
+			continue
+		}
 		if !f.Linear() {
 			count[f.Type]++
 			parent := fs[f.Parent-1]
@@ -89,7 +114,23 @@ func TestPlacement(t *testing.T) {
 		case f.Type == TypeFault:
 			family, fp = FamilyFault, p.Fault
 		}
-		count[family]++
+		if f.Parent != 0 {
+			// A later segment of an interrupted old orogen: it follows the
+			// one before, of the same belt, with clear ground between.
+			first, prev := fs[f.Parent-1], fs[i-1]
+			if f.Kind != "old_orogen" || first.Kind != "old_orogen" || prev.ID != f.Parent && prev.Parent != f.Parent {
+				t.Errorf("feature %d: segment of %d does not follow its belt", f.ID, f.Parent)
+			}
+			a, z := prev.Backbone[len(prev.Backbone)-1], f.Backbone[0]
+			if gap := torusDistance(dom, Point{a.X, a.Y}, Point{z.X, z.Y}) - (a.WidthKM+z.WidthKM)/2; gap < p.InterruptGapKM[0]-1e-6 {
+				t.Errorf("feature %d: %v km of clear ground after segment %d", f.ID, gap, prev.ID)
+			}
+			if prev.ID == f.Parent {
+				count["interrupted"]++
+			}
+		} else {
+			count[family]++
+		}
 		if family == FamilyActiveMargin {
 			// The elevated flank is the inland one. The world has one
 			// continent, so the coast is the major coast.
@@ -104,8 +145,13 @@ func TestPlacement(t *testing.T) {
 			}
 		}
 		l := NewLine(dom, f.Backbone)
-		// Smoothing shortens a backbone a little.
-		if got := l.Length(); got < 0.9*fp.LengthKM[0] || got > fp.LengthKM[1] {
+		// Smoothing shortens a backbone a little. A segment of an
+		// interrupted belt is shorter, but keeps several samples.
+		least := 0.9 * fp.LengthKM[0]
+		if f.Parent != 0 || i+1 < len(fs) && fs[i+1].Parent == f.ID && fs[i+1].Linear() {
+			least = 0.9 * (minSegment - 1) * p.SampleKM
+		}
+		if got := l.Length(); got < least || got > fp.LengthKM[1] {
 			t.Errorf("feature %d: %s is %v km long", f.ID, family, got)
 		}
 		wide := lineWidth(f.Backbone)
@@ -147,12 +193,19 @@ func TestPlacement(t *testing.T) {
 	// its plateau and basin or an omission.
 	omitted := strings.Join(d.Omitted, "\n")
 	for family, n := range d.Requested {
-		if got := count[family] + strings.Count(omitted, family+" ") - strings.Count(omitted, "no room for a"); family != FamilyCollision && got != n {
+		got := count[family]
+		for _, o := range d.Omitted {
+			if strings.HasPrefix(o, family+" ") && !strings.Contains(o, "no room for a") {
+				got++
+			}
+		}
+		if got != n {
 			t.Errorf("%s: %d placed of %d requested; omitted:\n%s", family, count[family], n, omitted)
 		}
 	}
 	if count[FamilyCollision] == 0 || count[FamilyOldOrogen] == 0 || count[TypePlateau] == 0 || count[TypeBasin] == 0 ||
-		count[FamilyActiveMargin] == 0 || count[FamilyIslandArc] == 0 || count[FamilyFault] == 0 {
+		count[FamilyActiveMargin] == 0 || count[FamilyIslandArc] == 0 || count[FamilyFault] == 0 ||
+		count["interrupted"] == 0 || count["intermontane"] == 0 || count[FamilyInteriorBasin] == 0 {
 		t.Errorf("placed %v on a continent with room for every family", count)
 	}
 	// Unrelated features do not overlap; a plateau or basin may overlap
@@ -203,15 +256,15 @@ func TestPlacementWithoutRoom(t *testing.T) {
 		if err := ff.Validate(ff.Domain); err != nil {
 			t.Errorf("%s: %v", name, err)
 		}
-		// One collision belt, active margin, old orogen, and fault are
-		// always requested.
+		// One collision belt, active margin, old orogen, interior basin,
+		// and fault are always requested.
 		faults := 0
 		for _, f := range fs {
 			if f.Type == TypeFault {
 				faults++
 			}
 		}
-		if name != "land" && (len(fs) != faults || faults+len(d.Omitted) != 4 || name == "ocean" && faults != 0) {
+		if name != "land" && (len(fs) != faults || faults+len(d.Omitted) != 5 || name == "ocean" && faults != 0) {
 			t.Errorf("%s: %d features, omitted %v", name, len(fs), d.Omitted)
 		}
 	}
@@ -236,5 +289,56 @@ func TestResample(t *testing.T) {
 	}
 	if math.Abs(torusDistance(Domain{100, 50}, Point{5, 5}, Point{195, -45})-10) > 1e-9 {
 		t.Error("torus distance does not wrap")
+	}
+}
+
+// A straight old orogen is cut into segments with at least the drawn gap of
+// clear ground between neighbors, tapered to the end width at each cut, and
+// left whole when it is too short to cut.
+func TestInterrupt(t *testing.T) {
+	dom := Domain{20000, 10000}
+	p := DefaultPlacementParams()
+	pl := &placer{p: p, dom: dom}
+	b := make([]Sample, 31) // 3,000 km at 100 km spacing, 200 km wide
+	for i := range b {
+		b[i] = Sample{19000 + 100*float64(i), 500, 200}
+	}
+	end := round3(p.EndWidth * 200)
+	for _, c := range []struct {
+		name string
+		u    [8]float64
+		segs int
+		gap  float64
+	}{
+		{"one gap", [8]float64{4: 0.9, 5: 0.5, 7: 0}, 2, 100},
+		{"two gaps", [8]float64{4: 0.1, 5: 0, 6: 1, 7: 1}, 3, 300},
+	} {
+		segs := pl.interrupt(b, c.u)
+		if len(segs) != c.segs {
+			t.Fatalf("%s: %d segments", c.name, len(segs))
+		}
+		total := 0
+		for k, seg := range segs {
+			total += len(seg)
+			if len(seg) < minSegment || seg[0].X < 0 || seg[0].X >= dom.WidthKM {
+				t.Errorf("%s: segment %d has %d samples, first at x %v", c.name, k, len(seg), seg[0].X)
+			}
+			if k == 0 {
+				continue
+			}
+			a, z := segs[k-1][len(segs[k-1])-1], seg[0]
+			if a.WidthKM != end || z.WidthKM != end {
+				t.Errorf("%s: cut %d widths %v and %v, want %v", c.name, k, a.WidthKM, z.WidthKM, end)
+			}
+			if clear := torusDistance(dom, Point{a.X, a.Y}, Point{z.X, z.Y}) - end; clear < c.gap || clear > c.gap+200 {
+				t.Errorf("%s: cut %d leaves %v km clear, want at least %v", c.name, k, clear, c.gap)
+			}
+		}
+		if total >= len(b) {
+			t.Errorf("%s: segments keep %d of %d samples", c.name, total, len(b))
+		}
+	}
+	if segs := pl.interrupt(b[:9], [8]float64{4: 0.9, 5: 0.5}); segs != nil {
+		t.Errorf("cut a 800 km belt into %d segments", len(segs))
 	}
 }

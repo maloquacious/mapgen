@@ -42,7 +42,7 @@ Contracts and invariants (wrapping, determinism, land fraction, artifact formats
    See [cmd/landmask/README.md](cmd/landmask/README.md).
 
 3. `cmd/structure`: attaches geological features (belts, rifts, arcs, faults, plateaus, basins) to a `continents` artifact and writes a self-contained structure checkpoint.
-   It partitions the map into geological provinces and interprets the provisional coast (coast distance and coast chains on a 50 km working grid). Features come from an explicit fixture file or from automatic placement, which places collision belts with plateaus and foreland basins, active margins with inland basins, old orogens, rifts, island arcs, and faults.
+   It partitions the map into geological provinces and interprets the provisional coast (coast distance and coast chains on a 50 km working grid). Features come from an explicit fixture file or from automatic placement, which places collision belts with plateaus and foreland basins, active margins with inland basins, intermontane basins inside wide belts, old orogens (some interrupted), rifts, island arcs, interior basins, and faults.
    Rock classification converts features and provinces to geological proxies (pressure, shear, igneous influence) and classifies every cell as sedimentary, igneous, or metamorphic.
    `--recenter` translates the complete result to center the largest landmass.
    See [cmd/structure/README.md](cmd/structure/README.md).

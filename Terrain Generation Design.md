@@ -357,9 +357,9 @@ The terrain-mode artifact carries the clamped elevation, high, and relief fields
 
 ### Prerequisite in structure
 
-Structure step 3 is not finished: automatic placement does not yet place interrupted old belts, intermontane basins, or interior basins.
-An interrupted old belt is one of structure's required visual fixtures, and terrain step 2 needs every feature kind to exist before its handoff can be called proven.
-Finish those in structure before starting terrain step 1.
+Structure step 3 is finished: automatic placement produces every feature kind, including interrupted old belts, intermontane basins, and interior basins.
+`internal/structure/testdata/fixture.json` holds one of every kind, so terrain step 2 can test the handoff on it.
+An interrupted belt is a chain of `old_orogen` segments, each after the first naming the first as its parent; terrain treats each segment as an ordinary belt.
 
 ## Open decisions
 

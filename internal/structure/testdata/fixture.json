@@ -43,6 +43,24 @@
       "id": 7, "type": "basin", "kind": "foreland", "key": "7", "parent": 1, "side": "right",
       "outline": [ { "x": 520, "y": 160 }, { "x": 560, "y": 200 }, { "x": 500, "y": 200 } ],
       "edge_km": 5
+    },
+    {
+      "id": 8, "type": "mountain_belt", "kind": "old_orogen", "name": "interrupted old belt, first segment",
+      "key": "8", "maturity": 0.8, "elevated_flank": "none",
+      "backbone": [ { "x": 60, "y": 150, "width_km": 20 }, { "x": 95, "y": 158, "width_km": 30 }, { "x": 130, "y": 170, "width_km": 20 } ],
+      "targets": { "regional_elevation_m": [300, 1200], "relief_m": [500, 1100] }
+    },
+    {
+      "id": 9, "type": "mountain_belt", "kind": "old_orogen", "name": "interrupted old belt, second segment",
+      "key": "9", "parent": 8, "maturity": 0.8, "elevated_flank": "none",
+      "backbone": [ { "x": 180, "y": 180, "width_km": 20 }, { "x": 220, "y": 188, "width_km": 30 }, { "x": 260, "y": 200, "width_km": 20 } ],
+      "targets": { "regional_elevation_m": [300, 1200], "relief_m": [500, 1100] }
+    },
+    {
+      "id": 10, "type": "basin", "kind": "intermontane", "key": "10", "parent": 1, "side": "right",
+      "outline": [ { "x": 560, "y": 123 }, { "x": 640, "y": 131 }, { "x": 640, "y": 150 }, { "x": 560, "y": 142 } ],
+      "edge_km": 6,
+      "targets": { "regional_elevation_m": [500, 2000], "relief_m": [0, 400] }
     }
   ]
 }

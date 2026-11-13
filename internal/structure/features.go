@@ -207,6 +207,11 @@ func (f *Feature) validate(dom Domain, byID map[uint32]*Feature) error {
 		if err = oneOf("kind", f.Kind, "collision", "active_margin", "old_orogen"); err == nil {
 			err = oneOf("elevated_flank", f.ElevatedFlank, "left", "right", "none")
 		}
+		// A belt names another as its parent when both are segments of one
+		// interrupted belt.
+		if err == nil && parent != nil && (parent.Type != TypeMountainBelt || parent.Kind != f.Kind) {
+			err = fmt.Errorf("parent must be a mountain_belt of the same kind")
+		}
 		if err == nil && (f.Maturity == nil || !(*f.Maturity >= 0 && *f.Maturity <= 1)) {
 			err = fmt.Errorf("maturity is required, in [0, 1]")
 		}

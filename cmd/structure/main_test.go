@@ -36,7 +36,7 @@ func TestCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Manifest.Seed != 9 || got.Manifest.FeatureCount != 7 {
+	if got.Manifest.Seed != 9 || got.Manifest.FeatureCount != 10 {
 		t.Errorf("manifest: seed %d, %d features", got.Manifest.Seed, got.Manifest.FeatureCount)
 	}
 	// 576 x 288 km at a 50 km working spacing.

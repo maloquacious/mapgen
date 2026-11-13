@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	PlacementAlgorithm = "placement-v1"
+	PlacementAlgorithm = "placement-v2"
 	ModeAutomatic      = "automatic"
 	DomainRequests     = "structure-v1/requests"
 	DomainPlace        = "structure-v1/place/" // followed by the family name
@@ -27,11 +27,14 @@ const (
 	FamilyRift         = "rift"
 	FamilyIslandArc    = "island_arc"
 	FamilyFault        = "fault"
+	// FamilyInteriorBasin places interior basins: area features with no
+	// parent, so not grown from a backbone.
+	FamilyInteriorBasin = "interior_basin"
 )
 
 // familyNumbers are the sequence numbers of each family's request stream.
 // They are fixed, so adding a family does not disturb the others.
-var familyNumbers = map[string]uint64{FamilyCollision: 0, FamilyActiveMargin: 1, FamilyOldOrogen: 2, FamilyRift: 3, FamilyIslandArc: 4, FamilyFault: 5}
+var familyNumbers = map[string]uint64{FamilyCollision: 0, FamilyActiveMargin: 1, FamilyOldOrogen: 2, FamilyRift: 3, FamilyIslandArc: 4, FamilyFault: 5, FamilyInteriorBasin: 6}
 
 // FamilyParams are the calibration values for one family of events.
 type FamilyParams struct {
@@ -92,14 +95,27 @@ type PlacementParams struct {
 	MarginBasin float64 `json:"margin_basin"`
 	// FaultSwingDeg is MaxSwingDeg for faults, and FaultSense the shares
 	// that are strike-slip and normal; the rest are thrusts.
-	FaultSwingDeg float64      `json:"fault_swing_deg"`
-	FaultSense    [2]float64   `json:"fault_sense"`
-	Collision     FamilyParams `json:"collision"`
-	ActiveMargin  FamilyParams `json:"active_margin"`
-	OldOrogen     FamilyParams `json:"old_orogen"`
-	Rift          FamilyParams `json:"rift"`
-	IslandArc     FamilyParams `json:"island_arc"`
-	Fault         FamilyParams `json:"fault"`
+	FaultSwingDeg float64    `json:"fault_swing_deg"`
+	FaultSense    [2]float64 `json:"fault_sense"`
+	// InterruptedShare is the share of old orogens cut into segments, with
+	// InterruptGapKM of clear ground between the envelopes of neighbors.
+	InterruptedShare float64    `json:"interrupted_share"`
+	InterruptGapKM   [2]float64 `json:"interrupt_gap_km"`
+	// IntermontaneShare is the share of collision belts and active margins
+	// at least IntermontaneWidthKM wide given an intermontane basin.
+	IntermontaneShare   float64 `json:"intermontane_share"`
+	IntermontaneWidthKM float64 `json:"intermontane_width_km"`
+	// An interior basin keeps InteriorCoastKM from the provisional coast.
+	InteriorCoastKM float64      `json:"interior_coast_km"`
+	Collision       FamilyParams `json:"collision"`
+	ActiveMargin    FamilyParams `json:"active_margin"`
+	OldOrogen       FamilyParams `json:"old_orogen"`
+	Rift            FamilyParams `json:"rift"`
+	IslandArc       FamilyParams `json:"island_arc"`
+	Fault           FamilyParams `json:"fault"`
+	// InteriorBasin's LengthKM and WidthKM are the ranges of a basin's long
+	// and short axes.
+	InteriorBasin FamilyParams `json:"interior_basin"`
 }
 
 // DefaultPlacementParams returns the placement-v1 defaults. Counts and
@@ -111,12 +127,14 @@ func DefaultPlacementParams() PlacementParams {
 		PlateauDepth: [2]float64{0.5, 1}, ForelandDepth: [2]float64{0.4, 0.8}, AxisFraction: [2]float64{0.2, 0.4},
 		MainlandKM2: 1e6, OceanKM2: 2e6, MarginOffsetKM: [2]float64{50, 200}, ArcOffsetKM: [2]float64{200, 600},
 		DriftKM: 100, CoastSwingDeg: 90, MarginBasin: 0.5, FaultSwingDeg: 20, FaultSense: [2]float64{0.5, 0.25},
-		Collision:    FamilyParams{AreaPerEvent: 35, Minimum: 1, LengthKM: [2]float64{1500, 5000}, WidthKM: [2]float64{300, 1200}, Maturity: &[2]float64{0, 0.3}},
-		ActiveMargin: FamilyParams{AreaPerEvent: 30, Minimum: 1, LengthKM: [2]float64{1500, 6000}, WidthKM: [2]float64{100, 400}, Maturity: &[2]float64{0, 0.4}},
-		OldOrogen:    FamilyParams{AreaPerEvent: 20, Minimum: 1, LengthKM: [2]float64{1000, 3500}, WidthKM: [2]float64{100, 600}, Maturity: &[2]float64{0.6, 1}},
-		Rift:         FamilyParams{AreaPerEvent: 45, Minimum: 0, LengthKM: [2]float64{800, 3000}, WidthKM: [2]float64{50, 300}},
-		IslandArc:    FamilyParams{AreaPerEvent: 50, Minimum: 0, LengthKM: [2]float64{600, 2500}, WidthKM: [2]float64{30, 150}},
-		Fault:        FamilyParams{AreaPerEvent: 25, Minimum: 1, LengthKM: [2]float64{300, 2000}, WidthKM: [2]float64{20, 100}},
+		InterruptedShare: 0.5, InterruptGapKM: [2]float64{100, 300}, IntermontaneShare: 0.5, IntermontaneWidthKM: 250, InteriorCoastKM: 100,
+		Collision:     FamilyParams{AreaPerEvent: 35, Minimum: 1, LengthKM: [2]float64{1500, 5000}, WidthKM: [2]float64{300, 1200}, Maturity: &[2]float64{0, 0.3}},
+		ActiveMargin:  FamilyParams{AreaPerEvent: 30, Minimum: 1, LengthKM: [2]float64{1500, 6000}, WidthKM: [2]float64{100, 400}, Maturity: &[2]float64{0, 0.4}},
+		OldOrogen:     FamilyParams{AreaPerEvent: 20, Minimum: 1, LengthKM: [2]float64{1000, 3500}, WidthKM: [2]float64{100, 600}, Maturity: &[2]float64{0.6, 1}},
+		Rift:          FamilyParams{AreaPerEvent: 45, Minimum: 0, LengthKM: [2]float64{800, 3000}, WidthKM: [2]float64{50, 300}},
+		IslandArc:     FamilyParams{AreaPerEvent: 50, Minimum: 0, LengthKM: [2]float64{600, 2500}, WidthKM: [2]float64{30, 150}},
+		Fault:         FamilyParams{AreaPerEvent: 25, Minimum: 1, LengthKM: [2]float64{300, 2000}, WidthKM: [2]float64{20, 100}},
+		InteriorBasin: FamilyParams{AreaPerEvent: 25, Minimum: 1, LengthKM: [2]float64{400, 1500}, WidthKM: [2]float64{300, 1000}},
 	}
 }
 
@@ -196,8 +214,10 @@ type placer struct {
 // place runs automatic placement and returns the features in placement
 // order: collision belts, each followed by its plateau and foreland basin,
 // then active margins, each followed by its inland basin if it has one, old
-// orogens, rifts, island arcs, and faults. Larger and more constrained
-// events choose first. Requests that cannot be placed are recorded in diag
+// orogens, an interrupted one as consecutive segments, rifts, island arcs,
+// interior basins, and faults. A collision belt or active margin with an
+// intermontane basin is followed by it after its other basins. Larger and
+// more constrained events choose first. Requests that cannot be placed are recorded in diag
 // as omissions.
 func place(ctx context.Context, seed uint64, p PlacementParams, dom Domain, coast *Coast, landKM2 float64, diag *Diagnostics) ([]Feature, error) {
 	pl := &placer{p: p, seed: seed, dom: dom, coast: coast, occupied: make([]uint32, len(coast.Land)), features: []Feature{}, diag: diag}
@@ -210,7 +230,7 @@ func place(ctx context.Context, seed uint64, p PlacementParams, dom Domain, coas
 		name string
 		fp   FamilyParams
 	}{{FamilyCollision, p.Collision}, {FamilyActiveMargin, p.ActiveMargin}, {FamilyOldOrogen, p.OldOrogen},
-		{FamilyRift, p.Rift}, {FamilyIslandArc, p.IslandArc}, {FamilyFault, p.Fault}} {
+		{FamilyRift, p.Rift}, {FamilyIslandArc, p.IslandArc}, {FamilyInteriorBasin, p.InteriorBasin}, {FamilyFault, p.Fault}} {
 		n := max(fam.fp.Minimum, int(math.Round(landKM2/1e6/fam.fp.AreaPerEvent)))
 		diag.Requested[fam.name] = n
 		requests := prng.New(seed, DomainRequests, familyNumbers[fam.name])
@@ -224,7 +244,11 @@ func place(ctx context.Context, seed uint64, p PlacementParams, dom Domain, coas
 			for k := range u {
 				u[k] = requests.Float64()
 			}
-			pl.request(fam.name, fam.fp, i, u)
+			if fam.name == FamilyInteriorBasin {
+				pl.interior(fam.fp, i, u)
+			} else {
+				pl.request(fam.name, fam.fp, i, u)
+			}
 		}
 	}
 	return pl.features, nil
@@ -279,11 +303,7 @@ func (pl *placer) request(family string, fp FamilyParams, index int, u [8]float6
 		reasons[reason]++
 	}
 	if backbone == nil {
-		var parts []string
-		for _, r := range slices.Sorted(maps.Keys(reasons)) {
-			parts = append(parts, fmt.Sprintf("%s %d", r, reasons[r]))
-		}
-		pl.diag.Omitted = append(pl.diag.Omitted, fmt.Sprintf("%s %d: not placed in %d attempts (%s)", family, index+1, pl.p.Attempts, strings.Join(parts, ", ")))
+		pl.omit(family, index, reasons)
 		return
 	}
 	f := Feature{ID: uint32(len(pl.features) + 1), Key: &key, Backbone: backbone}
@@ -321,11 +341,46 @@ func (pl *placer) request(family string, fp FamilyParams, index int, u [8]float6
 		}
 		f.Targets = &Targets{RegionalElevationM: &[2]float64{1500, 3000}, ReliefM: &[2]float64{2500, 5000}}
 	}
+	if family == FamilyOldOrogen && u[3] < p.InterruptedShare {
+		if segments := pl.interrupt(backbone, u); segments != nil {
+			// The segments after the first name it as their parent.
+			first := f.ID
+			for k, seg := range segments {
+				g := f
+				g.ID, g.Backbone = uint32(len(pl.features)+1), seg
+				if k > 0 {
+					skey := rng.Uint64()
+					g.Key, g.Parent = &skey, first
+				}
+				pl.features = append(pl.features, g)
+				pl.mark(NewLine(pl.dom, seg), g.ID)
+			}
+			return
+		}
+	}
 	pl.features = append(pl.features, f)
 	if family == FamilyFault {
 		return // a fault may cross anything, so it claims no cells
 	}
 	pl.mark(NewLine(pl.dom, backbone), f.ID)
+	// An intermontane basin is drawn after the belt's other basins, so their
+	// keys do not depend on it.
+	defer func() {
+		if family != FamilyCollision && family != FamilyActiveMargin || u[6] >= p.IntermontaneShare || lineWidth(backbone) < p.IntermontaneWidthKM {
+			return
+		}
+		side := Left
+		if u[7] >= 0.5 {
+			side = Right
+		}
+		if basin, edge := pl.within(backbone, f.ID, side); basin != nil {
+			ikey := rng.Uint64()
+			pl.add(Feature{Type: TypeBasin, Kind: "intermontane", Key: &ikey, Parent: f.ID, Side: side.String(), Outline: basin, EdgeKM: edge,
+				Targets: &Targets{RegionalElevationM: &[2]float64{500, 2000}, ReliefM: &[2]float64{0, 400}}})
+		} else {
+			pl.diag.Omitted = append(pl.diag.Omitted, fmt.Sprintf("%s %d: no room for an intermontane basin", family, index+1))
+		}
+	}()
 	if family == FamilyActiveMargin && u[4] < p.MarginBasin {
 		side := pl.inland(backbone)
 		if basin, edge := pl.flank(backbone, f.ID, side, 0.15, 0.85, lerp(p.ForelandDepth, u[5])*lineWidth(backbone), 0); basin != nil {
@@ -647,14 +702,7 @@ func (pl *placer) flank(b []Sample, parent uint32, side Side, from, to, depth, m
 	inner, normal, reach := make([]Point, n), make([]Point, n), make([]float64, n)
 	for k := range n {
 		i := i0 + k
-		a, z := b[max(i-1, 0)], b[min(i+1, len(b)-1)]
-		tx, ty := z.X-a.X, z.Y-a.Y
-		l := math.Hypot(tx, ty)
-		// Right of the direction of travel is (-ty, tx); see Side.
-		normal[k] = Point{-ty / l, tx / l}
-		if side == Left {
-			normal[k] = Point{ty / l, -tx / l}
-		}
+		normal[k] = sideNormal(b, i, side)
 		inner[k] = Point{b[i].X + 0.35*b[i].WidthKM*normal[k].X, b[i].Y + 0.35*b[i].WidthKM*normal[k].Y}
 		// Blunt ends, deepest in the middle.
 		want := depth * (0.35 + 0.65*math.Sin(math.Pi*float64(k)/float64(n-1)))
@@ -683,10 +731,7 @@ func (pl *placer) flank(b []Sample, parent uint32, side Side, from, to, depth, m
 		off := b[i0+k].WidthKM/2 + smooth[k]
 		outline = append(outline, Point{b[i0+k].X + off*normal[k].X, b[i0+k].Y + off*normal[k].Y})
 	}
-	ox, oy := math.Floor(outline[0].X/pl.dom.WidthKM)*pl.dom.WidthKM, math.Floor(outline[0].Y/pl.dom.HeightKM)*pl.dom.HeightKM
-	for k, q := range outline {
-		outline[k] = Point{round3(q.X - ox), round3(q.Y - oy)}
-	}
+	outline = toBase(pl.dom, outline)
 	if validateOutline(pl.dom, outline) != nil {
 		return nil, 0
 	}
@@ -704,4 +749,281 @@ func (pl *placer) flank(b []Sample, parent uint32, side Side, from, to, depth, m
 		return nil, 0
 	}
 	return outline, edge
+}
+
+// sideNormal returns the unit normal at sample i of a backbone, pointing to
+// the given side.
+func sideNormal(b []Sample, i int, side Side) Point {
+	a, z := b[max(i-1, 0)], b[min(i+1, len(b)-1)]
+	tx, ty := z.X-a.X, z.Y-a.Y
+	l := math.Hypot(tx, ty)
+	// Right of the direction of travel is (-ty, tx); see Side.
+	if side == Left {
+		return Point{ty / l, -tx / l}
+	}
+	return Point{-ty / l, tx / l}
+}
+
+// toBase moves unwrapped points by whole world widths and heights so the
+// first lies in the base domain, rounding them as saved geometry is.
+func toBase(dom Domain, pts []Point) []Point {
+	ox, oy := math.Floor(pts[0].X/dom.WidthKM)*dom.WidthKM, math.Floor(pts[0].Y/dom.HeightKM)*dom.HeightKM
+	out := make([]Point, len(pts))
+	for k, q := range pts {
+		out[k] = Point{round3(q.X - ox), round3(q.Y - oy)}
+	}
+	return out
+}
+
+// related reports whether the working cell owner o may lie under an area
+// that belongs to parent: o is free, the parent, or another of its children.
+func (pl *placer) related(o, parent uint32) bool {
+	return o == 0 || o == parent || pl.features[o-1].Parent == parent
+}
+
+// minSegment is the fewest samples a segment of an interrupted belt keeps.
+const minSegment = 4
+
+// interrupt cuts an old orogen's backbone into two or three segments with
+// clear ground between them. Each gap is centered at a drawn fraction of the
+// samples and widened until the straight distance between the neighboring
+// segment ends, less their half widths, is at least the drawn gap. The width
+// at a cut tapers to the belt's end width over two samples. interrupt returns
+// nil when a segment would keep fewer than minSegment samples; the belt then
+// stays whole.
+func (pl *placer) interrupt(b []Sample, u [8]float64) [][]Sample {
+	p := pl.p
+	end := p.EndWidth * lineWidth(b)
+	gap := lerp(p.InterruptGapKM, u[7])
+	centers := []float64{0.35 + 0.3*u[5]}
+	if u[4] < 0.5 {
+		centers = []float64{0.25 + 0.15*u[5], 0.6 + 0.15*u[6]}
+	}
+	clear := func(a, z int) float64 { return math.Hypot(b[z].X-b[a].X, b[z].Y-b[a].Y) - end }
+	n := len(b)
+	var cuts [][2]int
+	start := 0
+	for _, f := range centers {
+		c := int(math.Round(f * float64(n-1)))
+		h := 1
+		for c-h > start && c+h < n-1 && clear(c-h, c+h) < gap {
+			h++
+		}
+		a, z := c-h, c+h
+		if a-start+1 < minSegment || clear(a, z) < gap {
+			return nil
+		}
+		cuts = append(cuts, [2]int{a, z})
+		start = z
+	}
+	if n-start < minSegment {
+		return nil
+	}
+	taper := func(seg []Sample, at, in int) {
+		seg[at].WidthKM = round3(min(seg[at].WidthKM, end))
+		seg[in].WidthKM = round3(min(seg[in].WidthKM, (seg[in].WidthKM+end)/2))
+	}
+	segs := make([][]Sample, 0, len(cuts)+1)
+	start = 0
+	for k := range len(cuts) + 1 {
+		stop := n - 1
+		if k < len(cuts) {
+			stop = cuts[k][0]
+		}
+		seg := slices.Clone(b[start : stop+1])
+		if k > 0 {
+			taper(seg, 0, 1)
+		}
+		if k < len(cuts) {
+			taper(seg, len(seg)-1, len(seg)-2)
+			start = cuts[k][1]
+		}
+		pts := make([]Point, len(seg))
+		for i, s := range seg {
+			pts[i] = Point{s.X, s.Y}
+		}
+		for i, q := range toBase(pl.dom, pts) {
+			seg[i].X, seg[i].Y = q.X, q.Y
+		}
+		segs = append(segs, seg)
+	}
+	return segs
+}
+
+// within builds the outline of an intermontane basin inside a belt's
+// envelope: on the given side, along the middle half of the belt, from 15
+// percent of the half width out from the backbone to as much as 75 percent,
+// reaching farthest in the middle. The outer edge is pulled toward the
+// backbone wherever it would leave the provisional land or reach a feature
+// other than the belt and its other children. within returns nil when the
+// basin is on average less than 40 km across or comes within the gap of an
+// unrelated feature.
+func (pl *placer) within(b []Sample, parent uint32, side Side) ([]Point, float64) {
+	c := pl.coast
+	i0, i1 := int(math.Ceil(0.25*float64(len(b)-1))), int(math.Floor(0.75*float64(len(b)-1)))
+	if i1-i0 < 2 {
+		return nil, 0
+	}
+	n := i1 - i0 + 1
+	inner, normal, reach := make([]Point, n), make([]Point, n), make([]float64, n)
+	for k := range n {
+		i := i0 + k
+		normal[k] = sideNormal(b, i, side)
+		half := b[i].WidthKM / 2
+		inner[k] = Point{b[i].X + 0.15*half*normal[k].X, b[i].Y + 0.15*half*normal[k].Y}
+		want := 0.6 * half * (0.35 + 0.65*math.Sin(math.Pi*float64(k)/float64(n-1)))
+		for _, share := range [3]float64{1, 0.75, 0.5} {
+			off := 0.15*half + share*want
+			q := Point{b[i].X + off*normal[k].X, b[i].Y + off*normal[k].Y}
+			if c.DistanceAt(q) > 0 && pl.related(pl.owner(q), parent) {
+				reach[k] = share * want
+				break
+			}
+		}
+	}
+	mean := 0.0
+	smooth := make([]float64, n)
+	for k := range n {
+		smooth[k] = min(reach[k], (reach[max(k-1, 0)]+2*reach[k]+reach[min(k+1, n-1)])/4)
+		mean += smooth[k] / float64(n)
+	}
+	if mean < 40 {
+		return nil, 0
+	}
+	outline := make([]Point, 0, 2*n)
+	outline = append(outline, inner...)
+	for k := n - 1; k >= 0; k-- {
+		off := 0.15*b[i0+k].WidthKM/2 + smooth[k]
+		outline = append(outline, Point{b[i0+k].X + off*normal[k].X, b[i0+k].Y + off*normal[k].Y})
+	}
+	outline = toBase(pl.dom, outline)
+	if validateOutline(pl.dom, outline) != nil {
+		return nil, 0
+	}
+	edge := round3(min(max(0.3*mean, 10), 60))
+	if !pl.clearOf(NewRegion(pl.dom, outline, edge), parent) {
+		return nil, 0
+	}
+	return outline, edge
+}
+
+// clearOf reports whether no feature other than parent and its children
+// lies within the gap of the region. With parent 0, no feature may.
+func (pl *placer) clearOf(region *Region, parent uint32) bool {
+	c := pl.coast
+	box := region.Bounds()
+	gap := pl.p.GapKM
+	free := true
+	visit(pl.dom, c.Columns, c.Rows, Rect{box.MinX - gap, box.MinY - gap, box.MaxX + gap, box.MaxY + gap}, func(col, row int, q Point) {
+		if o := pl.occupied[row*c.Columns+col]; free && o != 0 && (parent == 0 || !pl.related(o, parent)) && region.Inside(q) >= -gap {
+			free = false
+		}
+	})
+	return free
+}
+
+// interiorVertices is the number of vertices in an interior basin's outline.
+const interiorVertices = 32
+
+// interior tries to place one interior basin: an area feature with no
+// parent, a broad sag in a continental interior.
+//
+// The basin is an ellipse with its long and short axes drawn from the
+// family's ranges, a random orientation, and a gentle wobble of its radius.
+// It is centered in a random free working cell at least half its short axis
+// inland. Each vertex is pulled toward the center, in steps down to 40
+// percent of its radius, until it lies at least InteriorCoastKM inland and
+// on a free cell. A candidate is rejected when a vertex finds no such place,
+// when its mean radius falls below 60 percent of the ellipse's, or when it
+// comes within the gap of another feature.
+func (pl *placer) interior(fp FamilyParams, index int, u [8]float64) {
+	rng := prng.New(pl.seed, DomainPlace+FamilyInteriorBasin, uint64(index))
+	key := rng.Uint64()
+	c, p := pl.coast, pl.p
+	long := lerp(fp.LengthKM, u[0])
+	short := min(lerp(fp.WidthKM, u[1]), long)
+	nominal := (long + short) / 4
+	var anchors []int
+	for i := range c.Distance {
+		if c.Distance[i] >= short/2 && pl.occupied[i] == 0 {
+			anchors = append(anchors, i)
+		}
+	}
+	reasons := map[string]int{}
+	var outline []Point
+	var edge float64
+	for range p.Attempts {
+		if len(anchors) == 0 {
+			reasons[reasonNoRoom] = p.Attempts
+			break
+		}
+		cell := anchors[rng.IntN(len(anchors))]
+		center := Point{(float64(cell%c.Columns) + rng.Float64()) * c.CellWidthKM, (float64(cell/c.Columns) + rng.Float64()) * c.CellHeightKM}
+		turn := rng.Float64() * math.Pi
+		var amp, phase [2]float64
+		for k := range amp {
+			amp[k], phase[k] = 0.08*rng.Float64(), 2*math.Pi*rng.Float64()
+		}
+		var reach [interiorVertices]float64
+		fits := true
+		for k := range reach {
+			t := 2 * math.Pi * float64(k) / interiorVertices
+			ca, sa := math.Cos(t-turn), math.Sin(t-turn)
+			r := (long / 2) * (short / 2) / math.Hypot(short/2*ca, long/2*sa)
+			r *= 1 + amp[0]*math.Cos(2*t+phase[0]) + amp[1]*math.Cos(3*t+phase[1])
+			for _, share := range [5]float64{1, 0.85, 0.7, 0.55, 0.4} {
+				q := Point{center.X + share*r*math.Cos(t), center.Y + share*r*math.Sin(t)}
+				if c.DistanceAt(q) >= p.InteriorCoastKM && pl.owner(q) == 0 {
+					reach[k] = share * r
+					break
+				}
+			}
+			fits = fits && reach[k] > 0
+		}
+		if !fits {
+			reasons[reasonNarrow]++
+			continue
+		}
+		mean := 0.0
+		pts := make([]Point, interiorVertices)
+		for k := range reach {
+			// Smooth around the ring without growing past what fit.
+			r := min(reach[k], (reach[(k+interiorVertices-1)%interiorVertices]+2*reach[k]+reach[(k+1)%interiorVertices])/4)
+			mean += r / interiorVertices
+			t := 2 * math.Pi * float64(k) / interiorVertices
+			pts[k] = Point{center.X + r*math.Cos(t), center.Y + r*math.Sin(t)}
+		}
+		if mean < 0.6*nominal {
+			reasons[reasonNarrow]++
+			continue
+		}
+		pts = toBase(pl.dom, pts)
+		if validateOutline(pl.dom, pts) != nil {
+			reasons[reasonCrossing]++
+			continue
+		}
+		e := round3(min(max(0.4*mean, 50), 250))
+		if !pl.clearOf(NewRegion(pl.dom, pts, e), 0) {
+			reasons[reasonOverlap]++
+			continue
+		}
+		outline, edge = pts, e
+		break
+	}
+	if outline == nil {
+		pl.omit(FamilyInteriorBasin, index, reasons)
+		return
+	}
+	pl.add(Feature{Type: TypeBasin, Kind: "interior", Key: &key, Outline: outline, EdgeKM: edge,
+		Targets: &Targets{RegionalElevationM: &[2]float64{0, 300}, ReliefM: &[2]float64{0, 150}}})
+}
+
+// omit records a request that was not placed, with a count of each reason
+// its candidates were rejected.
+func (pl *placer) omit(family string, index int, reasons map[string]int) {
+	var parts []string
+	for _, r := range slices.Sorted(maps.Keys(reasons)) {
+		parts = append(parts, fmt.Sprintf("%s %d", r, reasons[r]))
+	}
+	pl.diag.Omitted = append(pl.diag.Omitted, fmt.Sprintf("%s %d: not placed in %d attempts (%s)", family, index+1, pl.p.Attempts, strings.Join(parts, ", ")))
 }

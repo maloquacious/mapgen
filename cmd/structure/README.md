@@ -38,8 +38,11 @@ This covers implementation steps 1 to 5 of that design: feature records, geometr
 
 ## Automatic placement
 
-Without `--features` the command places, in this order: collision belts, each with a plateau on one flank and a foreland basin on the other; active margins, about half with an inland basin; old orogens; rifts; island arcs; and faults.
-The number of each scales with the provisional land area; on the full-size seed 42 map that is 7 collision belts, 9 active margins (8 found room), 13 old orogens, 6 rifts, 5 island arcs, and 10 faults.
+Without `--features` the command places, in this order: collision belts, each with a plateau on one flank and a foreland basin on the other; active margins, about half with an inland basin; old orogens, about half of them interrupted; rifts; island arcs; interior basins; and faults.
+About half the collision belts and active margins at least 250 km wide also get an intermontane basin inside the belt.
+The number of each scales with the provisional land area; on the full-size seed 42 map that is 7 collision belts, 9 active margins (8 found room), 13 old orogens (5 interrupted), 6 rifts, 5 island arcs, 10 interior basins, 10 faults, and 7 intermontane basins.
+An interrupted old orogen is saved as two or three `old_orogen` belts along one line with 100 to 300 km of clear ground between them; each segment after the first names the first as its `parent`.
+An interior basin is a broad oval sag at least 100 km inland, with no parent.
 Inland belts stay inland, narrow where the land narrows, and do not hook back on themselves.
 An active margin follows the coast of a large landmass facing an ocean, 50 to 200 km inland; an island arc follows such a coast 200 to 600 km offshore.
 Features keep 100 km clear of one another, except faults, which may cross anything.
@@ -71,6 +74,7 @@ The features of a recentered artifact describe the shifted world, so they are no
 
 A fixture is drawn for one particular continental artifact: its `domain` must equal that artifact's physical extent.
 `internal/structure/testdata/fixture.json` is drawn for `continents --seed 42 --cols 96 --rows 48` (576 x 288 km).
+It holds at least one of every feature type and kind, including an interrupted old belt, an intermontane basin, and an interior basin.
 
 Every feature in a fixture is required. An invalid feature is an error that names the feature's ID.
 Geometry is in kilometers, `x` east and `y` south from the north-west corner, unwrapped on both axes: a belt that crosses a seam continues past the world's width or height instead of jumping back.
