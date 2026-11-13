@@ -23,7 +23,7 @@ This is implementation step 1 of that design: feature records, geometry queries,
 | `--in` | Continental artifact directory; default `tmp/continents` |
 | `--out` | New output directory; default `tmp/structure`. An existing one is never replaced |
 | `--features` | Feature fixture file, in the `mapgen-structure-features-v1` schema |
-| `--seed` | Structure seed, unsigned 64-bit. If omitted, one is generated, printed, and recorded. It is reserved for province growth and does not affect the output yet, apart from being recorded |
+| `--seed` | Structure seed, unsigned 64-bit. If omitted, the continental input's seed is used; the manifest records the seed and which of the two it was. It is reserved for province growth and does not affect the output yet, apart from being recorded |
 | `--provisional-land-fraction` | Fraction of cells treated as land while placing features; default 0.325 |
 | `--png` | Write `preview.png`; default true |
 | `--png-scale` | Preview sampling interval in cells; default 1 |

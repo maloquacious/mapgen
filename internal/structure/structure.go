@@ -38,6 +38,8 @@ const (
 	Selection       = "highest-affinity; ties by input row-major index; round(fraction*cells)"
 	Topology        = "torus: x and y wrap; the map may be recentered until climate"
 	ModeFixture     = "fixture"
+	SeedExplicit    = "explicit"
+	SeedFromInput   = "continental input"
 	Absent          = "absent"
 	ManifestFile    = "manifest.json"
 	MaskFile        = "provisional-land.u8"
@@ -70,6 +72,7 @@ type Manifest struct {
 	GeneratorVersion        string            `json:"generator_version"`
 	Input                   Input             `json:"input"`
 	Seed                    uint64            `json:"seed,string"`
+	SeedSource              string            `json:"seed_source"`
 	SeedDerivation          string            `json:"seed_derivation"`
 	PRNG                    string            `json:"prng"`
 	Grid                    continent.Grid    `json:"grid"`
@@ -114,7 +117,7 @@ func (r *Result) Domain() Domain {
 // Options are the inputs to Generate.
 type Options struct {
 	In       string  // continental artifact directory
-	Seed     uint64  // structure seed; recorded, and reserved for province growth
+	Seed     *uint64 // structure seed, reserved for province growth; nil uses the input's seed
 	Fraction float64 // provisional land fraction, in [0,1]
 	Features []byte  // contents of a feature fixture; required in this version
 	Version  string  // generator version
@@ -169,11 +172,17 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 		}
 	}
 	g.Access = "x and y wrap (torus)"
+	// The input's seed is a safe default: each stage draws from streams keyed
+	// by its own domain names, so sharing a seed does not correlate them.
+	seed, source := m.Seed, SeedFromInput
+	if o.Seed != nil {
+		seed, source = *o.Seed, SeedExplicit
+	}
 	r := &Result{
 		Manifest: Manifest{
 			Format: Format, GeneratorVersion: o.Version,
 			Input: Input{ManifestSHA256: checksum(data), Manifest: *m},
-			Seed:  o.Seed, SeedDerivation: prng.DerivationVersion, PRNG: prng.Algorithm,
+			Seed:  seed, SeedSource: source, SeedDerivation: prng.DerivationVersion, PRNG: prng.Algorithm,
 			Grid: g, Topology: Topology, Mode: ModeFixture,
 			ProvisionalLandFraction: o.Fraction, ProvisionalLandCells: k, ProvisionalSelection: Selection,
 			FeatureCount: len(ff.Features), Provinces: Absent, RockClassification: Absent,

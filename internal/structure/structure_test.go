@@ -63,7 +63,7 @@ func files(t *testing.T, dir string) map[string]string {
 
 func write(t *testing.T, in string, features []byte) string {
 	t.Helper()
-	r, err := structure.Generate(t.Context(), structure.Options{In: in, Seed: 7, Fraction: 0.325, Features: features, Version: "test"})
+	r, err := structure.Generate(t.Context(), structure.Options{In: in, Seed: new(uint64(7)), Fraction: 0.325, Features: features, Version: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := r.Manifest
-	if m.Format != structure.Format || m.Mode != structure.ModeFixture || m.Seed != 7 ||
+	if m.Format != structure.Format || m.Mode != structure.ModeFixture || m.Seed != 7 || m.SeedSource != structure.SeedExplicit ||
 		m.Provinces != structure.Absent || m.RockClassification != structure.Absent {
 		t.Errorf("manifest: %+v", m)
 	}
@@ -177,6 +177,14 @@ func TestGenerateRejects(t *testing.T) {
 		t.Errorf("without a fixture: %v", err)
 	}
 	o.Features = fixture(t)
+	// Without a seed, the continental input's seed is used and said so.
+	r, err := structure.Generate(t.Context(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Manifest.Seed != 42 || r.Manifest.SeedSource != structure.SeedFromInput {
+		t.Errorf("default seed %d from %q", r.Manifest.Seed, r.Manifest.SeedSource)
+	}
 	o.Fraction = 1.5
 	if _, err := structure.Generate(t.Context(), o); err == nil {
 		t.Error("accepted fraction 1.5")

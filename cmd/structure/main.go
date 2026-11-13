@@ -9,8 +9,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/binary"
 	"errors"
 	"flag"
 	"fmt"
@@ -40,7 +38,7 @@ func run(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("structure", flag.ContinueOnError)
 	in := fs.String("in", "tmp/continents", "continental input artifact directory")
 	out := fs.String("out", "tmp/structure", "new output artifact directory (must not exist)")
-	seedFlag := fs.String("seed", "", "structure seed, unsigned 64-bit (default: random, printed and recorded)")
+	seedFlag := fs.String("seed", "", "structure seed, unsigned 64-bit (default: the continental input's seed)")
 	fraction := fs.Float64("provisional-land-fraction", 0.325, "fraction of cells treated as land while placing features, in [0,1]")
 	features := fs.String("features", "", "feature fixture file (required until automatic placement exists)")
 	png := fs.Bool("png", true, "write preview.png")
@@ -66,11 +64,14 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	seed, err := parseSeed(*seedFlag)
-	if err != nil {
-		return err
+	var seed *uint64
+	if *seedFlag != "" {
+		v, err := strconv.ParseUint(*seedFlag, 10, 64)
+		if err != nil {
+			return fmt.Errorf("seed: %w", err)
+		}
+		seed = &v
 	}
-	log.Printf("seed %d", seed)
 	r, err := structure.Generate(ctx, structure.Options{
 		In: *in, Seed: seed, Fraction: *fraction, Features: fixture, Version: mapgen.Version().String(),
 	})
@@ -85,24 +86,10 @@ func run(ctx context.Context, args []string) error {
 		return err
 	}
 	m := r.Manifest
+	log.Printf("seed %d (%s)", m.Seed, m.SeedSource)
 	log.Printf("wrote %s: %d x %d, %d features, %d provisional land cells", *out, m.Grid.Columns, m.Grid.Rows, m.FeatureCount, m.ProvisionalLandCells)
 	for _, w := range r.Diagnostics.Warnings {
 		log.Printf("warning: %s", w)
 	}
 	return nil
-}
-
-func parseSeed(s string) (uint64, error) {
-	if s == "" {
-		var b [8]byte
-		if _, err := rand.Read(b[:]); err != nil {
-			return 0, err
-		}
-		return binary.LittleEndian.Uint64(b[:]), nil
-	}
-	seed, err := strconv.ParseUint(s, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("seed: %w", err)
-	}
-	return seed, nil
 }

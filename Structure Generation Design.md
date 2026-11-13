@@ -54,7 +54,7 @@ go run ./cmd/structure \
 | --- | --- |
 | `--in` | Accepted continental artifact; default `tmp/continents` |
 | `--out` | New output directory; default `tmp/structure` |
-| `--seed` | Independent structure seed; if omitted, generate, print, and record one |
+| `--seed` | Structure seed; if omitted, use the continental input's seed. The manifest records the seed and whether it was explicit. Stages share a seed safely because each draws from streams keyed by its own domain names |
 | `--provisional-land-fraction` | Fraction used to interpret continental affinity while placing features; default 0.325 |
 | `--config` | Deferred. A file that supplies values for these flags; not needed yet and not part of version one |
 | `--features` | Optional explicit feature fixture for algorithm development and repeatable visual comparisons |
