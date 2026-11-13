@@ -30,7 +30,7 @@ The reference implementation MUST:
 
 Version one excludes dynamic plate motion, spherical geometry, fluid atmosphere simulation, physical sediment transport, explicit glaciers, groundwater simulation, and geological predictions of real deposit abundance. Every surface river drains to an ocean or an overflowing lake. Endorheic basins are an optional later extension and MUST NOT appear accidentally as broken drainage.
 
-The input continent method is an adapter. This specification does not reconstruct an unspecified version of Olsson’s fracture algorithm. A coding agent MUST integrate an available implementation or accept a supplied scalar field. A substitute continent algorithm MUST be named as a substitute.
+The continent source is defined in the [Fracture Continent Generator Implementation Specification](https://chatgpt.com/space/page_75336a45b3948191919fb8b2977fd117), based on the pinned mdhender/hamwold implementation. Implement its rectangular adaptation through the ContinentSource adapter, retaining upstream compatibility as a separate fixture. A substitute continent algorithm MUST be named as a substitute.
 
 # 2 Coordinates units and resolution
 
