@@ -4,7 +4,6 @@
 package main
 
 import (
-	"errors"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -62,8 +61,11 @@ func TestCommand(t *testing.T) {
 	if err := run(t.Context(), args); err == nil {
 		t.Error("replaced an existing output directory")
 	}
-	if err := run(t.Context(), []string{"--in", in, "--out", filepath.Join(t.TempDir(), "none")}); !errors.Is(err, structure.ErrNoPlacement) {
+	auto := filepath.Join(t.TempDir(), "auto")
+	if err := run(t.Context(), []string{"--in", in, "--out", auto}); err != nil {
 		t.Errorf("without --features: %v", err)
+	} else if got, err := structure.Load(t.Context(), auto); err != nil || got.Manifest.Mode != structure.ModeAutomatic {
+		t.Errorf("without --features: %v, %+v", err, got)
 	}
 	noPreview := filepath.Join(t.TempDir(), "nopreview")
 	if err := run(t.Context(), []string{"--in", in, "--out", noPreview, "--features", fixture, "--png=false"}); err != nil {

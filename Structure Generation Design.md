@@ -343,10 +343,14 @@ All streams use `prng.New(seed, domain, sequence)` with the structure seed and t
 | `structure-v1/provinces/seeds` | Landmass number | Province seed positions within one landmass |
 | `structure-v1/provinces/cost` | 0 | The smooth field in the growth cost |
 | `structure-v1/provinces/types` | 0 | Volcanic draws, one per land province in ID order |
-| `structure-v1/requests` | 0 | Event counts and request attributes |
-| `structure-v1/place/<type>` | Request index within the type | All candidate attempts for one requested event |
+| `structure-v1/requests` | Family number | Request attributes for one family: eight values per request, whatever the family uses |
+| `structure-v1/place/<family>` | Request index within the family | All candidate attempts for one requested event |
+
+Families are `collision` (0), `active_margin` (1), `old_orogen` (2), `rift` (3), `island_arc` (4), and `fault` (5).
+The numbers are fixed, so adding a family does not change what the others draw.
 
 An automatically placed feature's `key` is the first value drawn from its placement stream.
+A plateau or basin placed with a belt draws its key from the belt's stream after the belt is placed.
 A fixture feature's `key` is whatever the file states.
 Terrain derives a feature's detail stream from the terrain seed, a terrain domain, and `key` as the sequence, so changing the terrain seed changes detail in every belt while an unchanged key keeps belts independent of one another.
 
@@ -421,6 +425,52 @@ The manifest records the parameters as `coast_parameters` with algorithm `coast-
 
 Which chains are eligible for active margins and island arcs is a placement decision, made in step 3.
 
+### Automatic placement
+
+Without `--features`, features are placed automatically and the manifest's `mode` is `automatic`.
+The manifest records the parameters as `placement_parameters` with algorithm `placement-v1`.
+The resulting `features.json` is a valid fixture and reproduces the same features.
+
+So far placement covers the inland families.
+Active margins, island arcs, and faults are not placed yet.
+
+**Requests.**
+Each family requests one event per so much provisional land: collision belts one per 35 million square km and at least one, old orogens one per 20 and at least one, rifts one per 45.
+Families are placed in the order collision, old orogen, rift, so the larger and more constrained events choose first.
+
+| Family | Length, km | Width at the middle, km | Other |
+| --- | --- | --- | --- |
+| Collision | 1,500–5,000 | 300–1,200 | Maturity 0–0.3; elevated flank drawn left or right |
+| Old orogen | 1,000–3,500 | 100–600 | Maturity 0.6–1; no elevated flank |
+| Rift | 800–3,000 | 50–300 | Axis fraction 0.2–0.4 |
+
+**Backbone.**
+A candidate starts at a random working cell that is free and far enough inland for the family's narrowest width, with a random heading.
+Its width at the middle is drawn between the family's minimum and the smaller of the family's maximum and twice the coast distance at the anchor.
+It grows from both ends in 50 km steps to the requested length, or until both ends are blocked.
+The heading drifts smoothly and bends no tighter than a radius of one belt width, and never tighter than 300 km.
+Neither half may turn more than 60 degrees from the heading it started with, so a belt curves but does not hook back.
+When the land three steps ahead is too narrow for the full width, the backbone turns toward the land farther from the coast.
+An end is blocked where the coast is nearer than half the end width, where another feature lies, or where the belt would come within its own width of itself.
+A candidate shorter than the family's minimum length is rejected; one that was blocked before its requested length is kept at the length it reached.
+
+The backbone is then smoothed, resampled every 100 km, and given widths: widest in the middle, 55 percent of that at the ends, and narrower wherever the coast is closer than half the width, but never below the end width.
+So a belt's envelope can overhang the provisional coast near its ends and where the land narrows.
+A candidate is rejected if its backbone crosses itself or if its envelope, widened by a 100 km gap, touches any feature already placed.
+
+Each request has at most 32 candidates.
+A request with none accepted is recorded in the diagnostics as an omission with a count of each reason for rejection.
+
+**Plateau and foreland basin.**
+A collision belt gets a plateau on its elevated flank and a foreland basin on the other.
+Each is an outline beside the middle of the belt: its inner edge runs inside the belt so the two blend, and its outer edge reaches up to 0.5–1 belt widths (plateau) or 0.4–0.8 (basin) beyond the belt's edge, deepest in the middle.
+The outer edge is pulled in where it would come within 50 km of the coast (plateau), cross the coast (basin), or reach another feature.
+If the plateau has no room on the drawn flank the other flank is tried, and the belt's `elevated_flank` follows the plateau.
+A plateau or basin that reaches less than 50 km on average, is not a simple outline, or comes within the gap of an unrelated feature is omitted and recorded.
+
+**Targets.**
+Targets are fixed by family from the cylindrical specification's ranges: collision belts 1,500–3,000 m regional elevation and 2,500–5,000 m relief; plateaus 2,500–4,500 m and 200–800 m; foreland basins 0–400 m and 0–200 m; rifts 300–1,500 m and 500–2,000 m; old orogens 300–1,200 m with relief from 500 m up to 2,500 m for the least mature and 1,000 m for the most.
+
 ### Geometry queries
 
 These are the handoff to terrain.
@@ -493,7 +543,7 @@ Evaluate structural placement before adding terrain noise.
 2. Add provisional coast interpretation and province ownership.
    Component labels and provinces are done.
 3. Add bounded, seeded automatic event placement and diagnostic previews.
-   It is built in three parts: coast distance and coast chains (done); inland features, which are collision belts and old orogens with their plateaus and basins, then rifts; and coastal features, which are active margins, island arcs, and faults.
+   It is built in three parts: coast distance and coast chains (done); inland features, which are collision belts with their plateaus and basins, old orogens, and rifts (done); and coastal features, which are active margins, island arcs, and faults.
 4. Specify geological proxy conversion and implement rock classification as its own deterministic substep.
 5. Add optional complete-result recentering after the coordinate and seam contracts are verified.
 

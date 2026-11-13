@@ -40,7 +40,7 @@ func run(ctx context.Context, args []string) error {
 	out := fs.String("out", "tmp/structure", "new output artifact directory (must not exist)")
 	seedFlag := fs.String("seed", "", "structure seed, unsigned 64-bit (default: the continental input's seed)")
 	fraction := fs.Float64("provisional-land-fraction", 0.325, "fraction of cells treated as land while placing features, in [0,1]")
-	features := fs.String("features", "", "feature fixture file (required until automatic placement exists)")
+	features := fs.String("features", "", "feature fixture file; if omitted, features are placed automatically")
 	png := fs.Bool("png", true, "write preview.png")
 	scale := fs.Int("png-scale", 1, "preview sampling interval in cells; 1 shows every cell")
 	version := fs.Bool("version", false, "print version and exit")
@@ -57,12 +57,15 @@ func run(ctx context.Context, args []string) error {
 	if *png && *scale < 1 {
 		return fmt.Errorf("png-scale must be at least 1")
 	}
-	if *features == "" {
-		return structure.ErrNoPlacement
-	}
-	fixture, err := os.ReadFile(*features)
-	if err != nil {
-		return err
+	var fixture []byte
+	if *features != "" {
+		var err error
+		if fixture, err = os.ReadFile(*features); err != nil {
+			return err
+		}
+		if fixture == nil {
+			fixture = []byte{}
+		}
 	}
 	var seed *uint64
 	if *seedFlag != "" {
@@ -87,7 +90,10 @@ func run(ctx context.Context, args []string) error {
 	}
 	m := r.Manifest
 	log.Printf("seed %d (%s)", m.Seed, m.SeedSource)
-	log.Printf("wrote %s: %d x %d, %d features, %d provisional land cells", *out, m.Grid.Columns, m.Grid.Rows, m.FeatureCount, m.ProvisionalLandCells)
+	log.Printf("wrote %s: %d x %d, %s mode, %d features, %d provisional land cells", *out, m.Grid.Columns, m.Grid.Rows, m.Mode, m.FeatureCount, m.ProvisionalLandCells)
+	for _, o := range r.Diagnostics.Omitted {
+		log.Printf("omitted: %s", o)
+	}
 	for _, w := range r.Diagnostics.Warnings {
 		log.Printf("warning: %s", w)
 	}

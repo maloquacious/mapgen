@@ -11,9 +11,11 @@
 // It also interprets the provisional coast (coast distance and coast chains
 // on a working grid) for automatic placement to use.
 //
-// This version accepts features only from an explicit fixture file.
-// Automatic placement, rock classification, and recentering are not
-// implemented; the manifest declares rock classification absent.
+// Features come from an explicit fixture file or from automatic placement,
+// which so far places collision belts with their plateaus and foreland
+// basins, old orogens, and rifts. Active margins, island arcs, faults, rock
+// classification, and recentering are not implemented; the manifest declares
+// rock classification absent.
 package structure
 
 import (
@@ -31,7 +33,6 @@ import (
 	"path/filepath"
 
 	"github.com/maloquacious/mapgen/internal/artifact"
-	"github.com/maloquacious/mapgen/internal/cerrs"
 	"github.com/maloquacious/mapgen/internal/continent"
 	"github.com/maloquacious/mapgen/internal/fracture"
 	"github.com/maloquacious/mapgen/internal/prng"
@@ -50,9 +51,6 @@ const (
 	FeaturesFile    = "features.json"
 	DiagnosticsFile = "diagnostics.json"
 	PreviewFile     = "preview.png"
-
-	// ErrNoPlacement is returned when no fixture is supplied.
-	ErrNoPlacement = cerrs.Error("automatic placement is not implemented; supply a feature fixture")
 )
 
 // Input identifies the continental checkpoint by content, not location.
@@ -93,6 +91,7 @@ type Manifest struct {
 	ProvinceCount           int               `json:"province_count"`
 	ProvinceParameters      ProvinceParams    `json:"province_parameters"`
 	CoastParameters         CoastParams       `json:"coast_parameters"`
+	PlacementParameters     *PlacementParams  `json:"placement_parameters,omitzero"`
 	RockClassification      string            `json:"rock_classification"`
 	Diagnostics             File              `json:"diagnostics"`
 	Fields                  []continent.Field `json:"fields"`
@@ -101,11 +100,14 @@ type Manifest struct {
 // Diagnostics are derived, reviewable facts about a run. They hold no
 // timings, so they are as reproducible as the manifest.
 type Diagnostics struct {
-	Mode     string         `json:"mode"`
-	Coast    *CoastSummary  `json:"coast,omitzero"`
-	Placed   map[string]int `json:"placed"`
-	Omitted  []string       `json:"omitted"`
-	Warnings []string       `json:"warnings"`
+	Mode  string        `json:"mode"`
+	Coast *CoastSummary `json:"coast,omitzero"`
+	// Requested counts automatic placement's requests by family. Placed
+	// counts the saved features by type.
+	Requested map[string]int `json:"requested,omitzero"`
+	Placed    map[string]int `json:"placed"`
+	Omitted   []string       `json:"omitted"`
+	Warnings  []string       `json:"warnings"`
 }
 
 // Result keeps everything in the same coordinates. In Land, 1 is provisional
@@ -131,21 +133,19 @@ type Options struct {
 	In       string  // continental artifact directory
 	Seed     *uint64 // structure seed; nil uses the input's seed
 	Fraction float64 // provisional land fraction, in [0,1]
-	Features []byte  // contents of a feature fixture; required in this version
+	Features []byte  // contents of a feature fixture; nil places features automatically
 	Version  string  // generator version
 }
 
 func checksum(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 
 // Generate reads and verifies the continental input, interprets it with a
-// provisional mask, and attaches the fixture's features. The input is never
+// provisional mask, and attaches the fixture's features or places features
+// automatically. The input is never
 // changed, and neither its path nor the fixture's is recorded.
 func Generate(ctx context.Context, o Options) (*Result, error) {
 	if !(o.Fraction >= 0 && o.Fraction <= 1) {
 		return nil, fmt.Errorf("provisional-land-fraction must be in [0,1]")
-	}
-	if o.Features == nil {
-		return nil, ErrNoPlacement
 	}
 	// Parse and checksum the same bytes.
 	data, err := os.ReadFile(filepath.Join(o.In, continent.ManifestFile))
@@ -166,12 +166,17 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("input: %w", err)
 	}
-	ff, err := ParseFeatures(o.Features)
-	if err != nil {
-		return nil, err
-	}
-	if err := ff.Validate(Domain{WidthKM: g.WidthKM, HeightKM: g.HeightKM}); err != nil {
-		return nil, err
+	dom := Domain{WidthKM: g.WidthKM, HeightKM: g.HeightKM}
+	mode := ModeAutomatic
+	ff := &FeatureFile{Format: FeaturesFormat, Domain: dom}
+	if o.Features != nil {
+		mode = ModeFixture
+		if ff, err = ParseFeatures(o.Features); err != nil {
+			return nil, err
+		}
+		if err := ff.Validate(dom); err != nil {
+			return nil, err
+		}
 	}
 	values := fields[continent.FieldAffinity].Values
 	k := int(math.Round(o.Fraction * float64(len(values))))
@@ -192,13 +197,13 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 			Format: Format, GeneratorVersion: o.Version,
 			Input: Input{ManifestSHA256: checksum(data), Manifest: *m},
 			Seed:  seed, SeedSource: source, SeedDerivation: prng.DerivationVersion, PRNG: prng.Algorithm,
-			Grid: g, Topology: Topology, Mode: ModeFixture,
+			Grid: g, Topology: Topology, Mode: mode,
 			ProvisionalLandFraction: o.Fraction, ProvisionalLandCells: k, ProvisionalSelection: Selection,
-			FeatureCount: len(ff.Features), RockClassification: Absent, ProvinceParameters: DefaultProvinceParams(),
+			RockClassification: Absent, ProvinceParameters: DefaultProvinceParams(),
 			CoastParameters: DefaultCoastParams(),
 		},
 		Land: land, Fields: fields, Features: ff,
-		Diagnostics: Diagnostics{Mode: ModeFixture, Placed: map[string]int{}, Omitted: []string{}, Warnings: ff.Warnings()},
+		Diagnostics: Diagnostics{Mode: mode, Placed: map[string]int{}, Omitted: []string{}},
 	}
 	// Provinces and the coast share one simplified mask, so specks and
 	// puddles are neither provinces nor coastlines.
@@ -211,6 +216,20 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 		return nil, err
 	}
 	r.Diagnostics.Coast = r.Coast.Summary()
+	if mode == ModeAutomatic {
+		p := DefaultPlacementParams()
+		r.Manifest.PlacementParameters = &p
+		landKM2 := float64(k) * g.CellWidthKM * g.CellHeightKM
+		if ff.Features, err = place(ctx, seed, p, dom, r.Coast, landKM2, &r.Diagnostics); err != nil {
+			return nil, err
+		}
+		// Placement must only produce what a fixture could state.
+		if err := ff.Validate(dom); err != nil {
+			return nil, fmt.Errorf("automatic placement: %w", err)
+		}
+	}
+	r.Manifest.FeatureCount = len(ff.Features)
+	r.Diagnostics.Warnings = ff.Warnings()
 	r.Manifest.ProvinceCount = len(r.Provinces.Provinces)
 	// Province IDs in a fixture are not trusted; they are recomputed here.
 	for i := range ff.Features {

@@ -4,7 +4,6 @@
 package structure_test
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -115,6 +114,47 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
+// An automatically placed artifact's features.json is a fixture that gives
+// the same features and provinces back.
+func TestAutomaticRoundTrip(t *testing.T) {
+	p, err := fracture.DefaultParams(42, 480, 240, 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fr, err := fracture.Generate(t.Context(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := filepath.Join(t.TempDir(), "continents")
+	if err := continent.Write(in, continent.NewManifest("test", fr), fr); err != nil {
+		t.Fatal(err)
+	}
+	o := structure.Options{In: in, Fraction: 0.325, Version: "test"}
+	auto, err := structure.Generate(t.Context(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if auto.Manifest.FeatureCount == 0 || auto.Manifest.Mode != structure.ModeAutomatic {
+		t.Fatalf("placed %d features in %s mode; omitted %v", auto.Manifest.FeatureCount, auto.Manifest.Mode, auto.Diagnostics.Omitted)
+	}
+	again, err := structure.Generate(t.Context(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := auto.Features.Marshal()
+	if got, _ := again.Features.Marshal(); string(got) != string(want) {
+		t.Error("automatic placement is not repeatable")
+	}
+	o.Features = want
+	fixed, err := structure.Generate(t.Context(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := fixed.Features.Marshal(); string(got) != string(want) || fixed.Manifest.Mode != structure.ModeFixture {
+		t.Error("features.json from automatic placement does not reproduce itself as a fixture")
+	}
+}
+
 func TestLoad(t *testing.T) {
 	in := continents(t)
 	out := write(t, in, fixture(t))
@@ -187,8 +227,12 @@ func TestLoad(t *testing.T) {
 func TestGenerateRejects(t *testing.T) {
 	in := continents(t)
 	o := structure.Options{In: in, Fraction: 0.325, Version: "test"}
-	if _, err := structure.Generate(t.Context(), o); !errors.Is(err, structure.ErrNoPlacement) {
+	// Without a fixture, features are placed automatically. This world is
+	// too small for any, and says so.
+	if r, err := structure.Generate(t.Context(), o); err != nil {
 		t.Errorf("without a fixture: %v", err)
+	} else if m, d := r.Manifest, r.Diagnostics; m.Mode != structure.ModeAutomatic || m.PlacementParameters == nil || m.FeatureCount != 0 || len(d.Omitted) != 2 {
+		t.Errorf("without a fixture: mode %q, %d features, omitted %v", m.Mode, m.FeatureCount, d.Omitted)
 	}
 	o.Features = fixture(t)
 	// Without a seed, the continental input's seed is used and said so.
