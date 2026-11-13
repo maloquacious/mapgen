@@ -85,11 +85,13 @@ type Grid struct {
 }
 
 type Layer struct {
-	Domain      string  `json:"domain"`
-	Bumps       int     `json:"bumps"`
-	MinRadiusKM float64 `json:"min_radius_km"`
-	MaxRadiusKM float64 `json:"max_radius_km"`
-	Falloff     float64 `json:"falloff"`
+	Domain         string  `json:"domain"`
+	Bumps          int     `json:"bumps"`
+	MinRadiusCells float64 `json:"min_radius_cells"`
+	MaxRadiusCells float64 `json:"max_radius_cells"`
+	MinRadiusKM    float64 `json:"min_radius_km"`
+	MaxRadiusKM    float64 `json:"max_radius_km"`
+	Falloff        float64 `json:"falloff"`
 }
 
 type Centering struct {
@@ -129,7 +131,12 @@ func NewManifest(generatorVersion string, res *fracture.Result) *Manifest {
 	p, c := res.Params, res.Centering
 	f := res.Affinity
 	layer := func(domain string, l fracture.Layer) Layer {
-		return Layer{Domain: domain, Bumps: l.Bumps, MinRadiusKM: l.MinRadiusKM, MaxRadiusKM: l.MaxRadiusKM, Falloff: l.Falloff}
+		return Layer{
+			Domain: domain, Bumps: l.Bumps,
+			MinRadiusCells: l.MinRadiusCells, MaxRadiusCells: l.MaxRadiusCells,
+			MinRadiusKM: l.MinRadiusCells * p.CellKM, MaxRadiusKM: l.MaxRadiusCells * p.CellKM,
+			Falloff: l.Falloff,
+		}
 	}
 	return &Manifest{
 		Format:           Format,

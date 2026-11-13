@@ -45,14 +45,14 @@ func main() {
 }
 
 type layerFlags struct {
-	bumps            int
-	minKM, maxKM, pf float64
+	bumps                  int
+	minCells, maxCells, pf float64
 }
 
 func (l *layerFlags) register(fs *flag.FlagSet, name string) {
-	fs.IntVar(&l.bumps, name+"-bumps", 0, name+" disc count (0 = default from area)")
-	fs.Float64Var(&l.minKM, name+"-min-km", 0, name+" minimum disc radius in km (0 = default)")
-	fs.Float64Var(&l.maxKM, name+"-max-km", 0, name+" maximum disc radius in km (0 = default)")
+	fs.IntVar(&l.bumps, name+"-bumps", 0, name+" disc count (0 = default from cell count)")
+	fs.Float64Var(&l.minCells, name+"-min-cells", 0, name+" minimum disc radius in cells (0 = default)")
+	fs.Float64Var(&l.maxCells, name+"-max-cells", 0, name+" maximum disc radius in cells (0 = default)")
 	fs.Float64Var(&l.pf, name+"-falloff", 0, name+" radius power-law falloff (0 = default)")
 }
 
@@ -60,11 +60,11 @@ func (l *layerFlags) apply(dst *fracture.Layer) {
 	if l.bumps != 0 {
 		dst.Bumps = l.bumps
 	}
-	if l.minKM != 0 {
-		dst.MinRadiusKM = l.minKM
+	if l.minCells != 0 {
+		dst.MinRadiusCells = l.minCells
 	}
-	if l.maxKM != 0 {
-		dst.MaxRadiusKM = l.maxKM
+	if l.maxCells != 0 {
+		dst.MaxRadiusCells = l.maxCells
 	}
 	if l.pf != 0 {
 		dst.Falloff = l.pf
@@ -117,9 +117,14 @@ func run(ctx context.Context, args []string) error {
 	p.Recenter = *recenter
 	p.ProvisionalLandFraction = *landFraction
 
-	log.Printf("seed %d, %d x %d cells of %g km (%.0f x %.0f km)", seed, p.Columns, p.Rows, *cellKM, p.WidthKM, p.HeightKM)
-	log.Printf("continental: %d discs, r %.1f..%.1f km, falloff %g", p.Continental.Bumps, p.Continental.MinRadiusKM, p.Continental.MaxRadiusKM, p.Continental.Falloff)
-	log.Printf("coast:       %d discs, r %.1f..%.1f km, falloff %g", p.Coast.Bumps, p.Coast.MinRadiusKM, p.Coast.MaxRadiusKM, p.Coast.Falloff)
+	log.Printf("seed %d, %d x %d cells of %g km (%.0f x %.0f km)", seed, p.Columns, p.Rows, p.CellKM, p.WidthKM(), p.HeightKM())
+	for _, l := range []struct {
+		name string
+		fracture.Layer
+	}{{"continental", p.Continental}, {"coast", p.Coast}} {
+		log.Printf("%-11s: %d discs, r %.1f..%.1f cells (%.1f..%.1f km), falloff %g", l.name, l.Bumps,
+			l.MinRadiusCells, l.MaxRadiusCells, l.MinRadiusCells*p.CellKM, l.MaxRadiusCells*p.CellKM, l.Falloff)
+	}
 
 	var timings []continent.TimingMS
 	lap := func(stage string, start time.Time) {

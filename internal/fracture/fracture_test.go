@@ -404,7 +404,7 @@ func TestCenteringAmbiguous(t *testing.T) {
 }
 
 func TestGenerateDeterministic(t *testing.T) {
-	p, err := DefaultParams(99, 120, 60, 25)
+	p, err := DefaultParams(99, 120, 60, 6)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,11 +440,15 @@ func TestDefaultParams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// ceil(39996/25) * ceil(19998/25) = 1600 * 800.
-	if p.Continental.Bumps != 320000 || p.Coast.Bumps != 160000 {
+	// N = 6666 * 3333 = 22217778.
+	if p.Continental.Bumps != 5554444 || p.Coast.Bumps != 2777222 {
 		t.Errorf("bumps %d %d", p.Continental.Bumps, p.Coast.Bumps)
 	}
-	if _, err := DefaultParams(1, 100, 10, 6); !errors.Is(err, ErrInvalidRadius) {
+	if cfg := p.config(p.Continental); cfg.MinRadiusKM != 9 || cfg.MaxRadiusKM != 6666 {
+		t.Errorf("continental radii %v..%v km", cfg.MinRadiusKM, cfg.MaxRadiusKM)
+	}
+	// rows/14 < 2 cells for fewer than 28 rows.
+	if _, err := DefaultParams(1, 100, 20, 6); !errors.Is(err, ErrInvalidRadius) {
 		t.Errorf("small domain: %v", err)
 	}
 }

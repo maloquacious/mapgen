@@ -12,12 +12,6 @@ import (
 )
 
 const (
-	// ReferenceSpacingKM is the canonical lattice spacing that sets default
-	// disc density. Disc counts derive from the physical area, not from the
-	// output raster, so the continental layout keeps the same statistics at
-	// any output spacing.
-	ReferenceSpacingKM = 25.0
-
 	// DefaultCoastWeight mixes coast detail into the continental field.
 	DefaultCoastWeight float32 = 0.02
 
@@ -26,62 +20,64 @@ const (
 	DomainCoast       = Version + "/coast"
 )
 
-// Layer holds the disc parameters for one field.
+// Layer holds the disc parameters for one field. Radii are in cells.
 type Layer struct {
-	Bumps                    int
-	MinRadiusKM, MaxRadiusKM float64
-	Falloff                  float64
+	Bumps                          int
+	MinRadiusCells, MaxRadiusCells float64
+	Falloff                        float64
 }
 
-// Params configures a complete continental affinity build.
+// Params configures a complete continental affinity build on a raster of
+// Columns x Rows square cells of CellKM.
 type Params struct {
-	Seed              uint64
-	Columns, Rows     int
-	WidthKM, HeightKM float64
-	Continental       Layer
-	Coast             Layer
-	CoastWeight       float32
-	Recenter          bool
+	Seed          uint64
+	Columns, Rows int
+	CellKM        float64
+	Continental   Layer
+	Coast         Layer
+	CoastWeight   float32
+	Recenter      bool
 	// ProvisionalLandFraction sizes the mask used to choose the recentering
 	// shift. It does not set sea level.
 	ProvisionalLandFraction float64
 }
 
-// DefaultParams returns the fracture-rect-v1 defaults for a raster of
-// columns x rows square cells of cellKM:
+// WidthKM returns the east-west extent.
+func (p Params) WidthKM() float64 { return float64(p.Columns) * p.CellKM }
+
+// HeightKM returns the north-south extent.
+func (p Params) HeightKM() float64 { return float64(p.Rows) * p.CellKM }
+
+// DefaultParams returns the fracture-rect-v1 defaults, which follow the
+// upstream generator in cell units. With N = columns*rows:
 //
-//	continental: floor(C/4) discs, radius 37.5 km to Ly/3, falloff 2.0
-//	coast:       floor(C/8) discs, radius 50 km to Ly/14, falloff 2.5
+//	continental: floor(N/4) discs, radius 1.5 to rows/3 cells, falloff 2.0
+//	coast:       floor(N/8) discs, radius 2 to rows/14 cells, falloff 2.5
 //
-// where C = ceil(Lx/25 km) * ceil(Ly/25 km) is the canonical cell count.
-// A domain too short for these ranges is rejected; set radii explicitly.
+// A raster too short for these ranges is rejected; set radii explicitly.
 func DefaultParams(seed uint64, columns, rows int, cellKM float64) (Params, error) {
-	if columns <= 0 || rows <= 0 {
+	if columns <= 0 || rows <= 0 || columns > math.MaxInt/rows {
 		return Params{}, fmt.Errorf("%w: %d x %d", ErrInvalidDimensions, columns, rows)
 	}
 	if !positiveFinite(cellKM) {
 		return Params{}, fmt.Errorf("%w: cell %v km", ErrInvalidExtent, cellKM)
 	}
-	lx, ly := float64(columns)*cellKM, float64(rows)*cellKM
-	canonical := math.Ceil(lx/ReferenceSpacingKM) * math.Ceil(ly/ReferenceSpacingKM)
-	if canonical/4 > MaxBumps {
-		return Params{}, fmt.Errorf("%w: domain needs %v discs", ErrInvalidBumps, canonical/4)
-	}
+	n := columns * rows
 	p := Params{
 		Seed:    seed,
 		Columns: columns, Rows: rows,
-		WidthKM: lx, HeightKM: ly,
+		CellKM: cellKM,
 		Continental: Layer{
-			Bumps:       int(canonical / 4),
-			MinRadiusKM: 1.5 * ReferenceSpacingKM,
-			MaxRadiusKM: ly / 3,
-			Falloff:     2.0,
+			Bumps:          n / 4,
+			MinRadiusCells: 1.5,
+			MaxRadiusCells: float64(rows) / 3,
+			Falloff:        2.0,
 		},
 		Coast: Layer{
-			Bumps:       int(canonical / 8),
-			MinRadiusKM: 2 * ReferenceSpacingKM,
-			MaxRadiusKM: ly / 14,
-			Falloff:     2.5,
+			Bumps:          n / 8,
+			MinRadiusCells: 2,
+			MaxRadiusCells: float64(rows) / 14,
+			Falloff:        2.5,
 		},
 		CoastWeight:             DefaultCoastWeight,
 		Recenter:                true,
@@ -91,9 +87,12 @@ func DefaultParams(seed uint64, columns, rows int, cellKM float64) (Params, erro
 		name string
 		Layer
 	}{{"continental", p.Continental}, {"coast", p.Coast}} {
-		if l.MaxRadiusKM < l.MinRadiusKM {
-			return Params{}, fmt.Errorf("%w: %s default range [%v, %v] km does not fit a %v km tall domain; set radii explicitly",
-				ErrInvalidRadius, l.name, l.MinRadiusKM, l.MaxRadiusKM, ly)
+		if l.Bumps > MaxBumps {
+			return Params{}, fmt.Errorf("%w: %s default %d exceeds %d; set bumps explicitly", ErrInvalidBumps, l.name, l.Bumps, MaxBumps)
+		}
+		if l.MaxRadiusCells < l.MinRadiusCells {
+			return Params{}, fmt.Errorf("%w: %s default range [%v, %v] cells does not fit %d rows; set radii explicitly",
+				ErrInvalidRadius, l.name, l.MinRadiusCells, l.MaxRadiusCells, rows)
 		}
 	}
 	return p, nil
@@ -102,10 +101,11 @@ func DefaultParams(seed uint64, columns, rows int, cellKM float64) (Params, erro
 func (p Params) config(l Layer) FractureConfig {
 	return FractureConfig{
 		Columns: p.Columns, Rows: p.Rows,
-		WidthKM: p.WidthKM, HeightKM: p.HeightKM,
+		WidthKM: p.WidthKM(), HeightKM: p.HeightKM(),
 		Bumps:       l.Bumps,
-		MinRadiusKM: l.MinRadiusKM, MaxRadiusKM: l.MaxRadiusKM,
-		Falloff: l.Falloff,
+		MinRadiusKM: l.MinRadiusCells * p.CellKM,
+		MaxRadiusKM: l.MaxRadiusCells * p.CellKM,
+		Falloff:     l.Falloff,
 	}
 }
 

@@ -15,7 +15,7 @@ import (
 )
 
 func TestRoundTrip(t *testing.T) {
-	p, err := fracture.DefaultParams(7, 96, 48, 25)
+	p, err := fracture.DefaultParams(7, 96, 48, 6)
 	if err != nil {
 		t.Fatal(err)
 	}
