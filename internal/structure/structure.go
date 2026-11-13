@@ -9,13 +9,14 @@
 // so the map can be recentered without breaks.
 //
 // This version accepts features only from an explicit fixture file.
-// Provinces, automatic placement, rock classification, and recentering are
-// not implemented; the manifest declares what is absent.
+// Automatic placement, rock classification, and recentering are not
+// implemented; the manifest declares rock classification absent.
 package structure
 
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
@@ -84,7 +85,10 @@ type Manifest struct {
 	ProvisionalLand         File              `json:"provisional_land"`
 	Features                File              `json:"features"`
 	FeatureCount            int               `json:"feature_count"`
-	Provinces               string            `json:"provinces"`
+	Provinces               File              `json:"provinces"`
+	ProvinceOwnership       File              `json:"province_ownership"`
+	ProvinceCount           int               `json:"province_count"`
+	ProvinceParameters      ProvinceParams    `json:"province_parameters"`
 	RockClassification      string            `json:"rock_classification"`
 	Diagnostics             File              `json:"diagnostics"`
 	Fields                  []continent.Field `json:"fields"`
@@ -106,6 +110,8 @@ type Result struct {
 	Land        []byte
 	Fields      map[string]*fracture.FractureField
 	Features    *FeatureFile
+	Provinces   *ProvinceFile
+	Owner       []uint32 // province ID of every cell, row-major
 	Diagnostics Diagnostics
 }
 
@@ -117,7 +123,7 @@ func (r *Result) Domain() Domain {
 // Options are the inputs to Generate.
 type Options struct {
 	In       string  // continental artifact directory
-	Seed     *uint64 // structure seed, reserved for province growth; nil uses the input's seed
+	Seed     *uint64 // structure seed; nil uses the input's seed
 	Fraction float64 // provisional land fraction, in [0,1]
 	Features []byte  // contents of a feature fixture; required in this version
 	Version  string  // generator version
@@ -161,10 +167,6 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 	if err := ff.Validate(Domain{WidthKM: g.WidthKM, HeightKM: g.HeightKM}); err != nil {
 		return nil, err
 	}
-	// Province IDs in a fixture are not trusted, and no provinces exist yet.
-	for i := range ff.Features {
-		ff.Features[i].Provinces = nil
-	}
 	values := fields[continent.FieldAffinity].Values
 	k := int(math.Round(o.Fraction * float64(len(values))))
 	land := make([]byte, len(values))
@@ -186,13 +188,24 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 			Seed:  seed, SeedSource: source, SeedDerivation: prng.DerivationVersion, PRNG: prng.Algorithm,
 			Grid: g, Topology: Topology, Mode: ModeFixture,
 			ProvisionalLandFraction: o.Fraction, ProvisionalLandCells: k, ProvisionalSelection: Selection,
-			FeatureCount: len(ff.Features), Provinces: Absent, RockClassification: Absent,
+			FeatureCount: len(ff.Features), RockClassification: Absent, ProvinceParameters: DefaultProvinceParams(),
 		},
 		Land: land, Fields: fields, Features: ff,
 		Diagnostics: Diagnostics{Mode: ModeFixture, Placed: map[string]int{}, Omitted: []string{}, Warnings: ff.Warnings()},
 	}
-	for _, f := range ff.Features {
+	r.Provinces, r.Owner, err = buildProvinces(ctx, seed, r.Manifest.ProvinceParameters, g, land, fields[continent.FieldContinental].Values)
+	if err != nil {
+		return nil, err
+	}
+	r.Manifest.ProvinceCount = len(r.Provinces.Provinces)
+	// Province IDs in a fixture are not trusted; they are recomputed here.
+	for i := range ff.Features {
+		f := &ff.Features[i]
+		f.Provinces = touched(r.Domain(), g.Columns, g.Rows, f.Shape(r.Domain()), r.Owner)
 		r.Diagnostics.Placed[f.Type]++
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -238,9 +251,21 @@ func Write(ctx context.Context, dir string, r *Result, previewScale int) error {
 		}
 		m.Fields = append(m.Fields, field)
 	}
-	if len(r.Land) != g.Columns*g.Rows {
-		return fmt.Errorf("provisional mask does not match the grid")
+	if len(r.Land) != g.Columns*g.Rows || len(r.Owner) != len(r.Land) {
+		return fmt.Errorf("provisional mask or province ownership does not match the grid")
 	}
+	provinces, err := r.Provinces.Marshal()
+	if err != nil {
+		return err
+	}
+	ownership := make([]byte, 0, 4*len(r.Owner))
+	for _, o := range r.Owner {
+		ownership = binary.LittleEndian.AppendUint32(ownership, o)
+	}
+	m.Provinces = File{File: ProvincesFile, Format: ProvincesFormat, SHA256: checksum(provinces),
+		Description: "geological province records"}
+	m.ProvinceOwnership = File{File: OwnershipFile, Format: "uint32 little-endian", SHA256: checksum(ownership),
+		Description: "row-major; the province ID of every cell, never 0"}
 	features, err := r.Features.Marshal()
 	if err != nil {
 		return err
@@ -263,7 +288,7 @@ func Write(ctx context.Context, dir string, r *Result, previewScale int) error {
 	for _, f := range []struct {
 		name string
 		data []byte
-	}{{MaskFile, r.Land}, {FeaturesFile, features}, {DiagnosticsFile, diagnostics}, {ManifestFile, append(manifest, '\n')}} {
+	}{{MaskFile, r.Land}, {ProvincesFile, provinces}, {OwnershipFile, ownership}, {FeaturesFile, features}, {DiagnosticsFile, diagnostics}, {ManifestFile, append(manifest, '\n')}} {
 		if err := os.WriteFile(filepath.Join(tmp, f.name), f.data, 0o644); err != nil {
 			return err
 		}
@@ -348,6 +373,28 @@ func Load(ctx context.Context, dir string) (*Result, error) {
 	if len(ff.Features) != m.FeatureCount {
 		return nil, fmt.Errorf("feature count mismatch")
 	}
+	pdata, err := read(m.Provinces, ProvincesFile)
+	if err != nil {
+		return nil, err
+	}
+	var pf ProvinceFile
+	if err := json.Unmarshal(pdata, &pf, json.RejectUnknownMembers(true)); err != nil {
+		return nil, fmt.Errorf("%s: %w", ProvincesFile, err)
+	}
+	odata, err := read(m.ProvinceOwnership, OwnershipFile)
+	if err != nil {
+		return nil, err
+	}
+	if len(odata) != 4*len(land) || len(pf.Provinces) != m.ProvinceCount {
+		return nil, fmt.Errorf("province ownership size or count mismatch")
+	}
+	owner := make([]uint32, len(land))
+	for i := range owner {
+		owner[i] = binary.LittleEndian.Uint32(odata[4*i:])
+	}
+	if err := pf.validate(owner); err != nil {
+		return nil, err
+	}
 	ddata, err := read(m.Diagnostics, DiagnosticsFile)
 	if err != nil {
 		return nil, err
@@ -360,5 +407,5 @@ func Load(ctx context.Context, dir string) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Result{Manifest: m, Land: land, Fields: fields, Features: ff, Diagnostics: d}, nil
+	return &Result{Manifest: m, Land: land, Fields: fields, Features: ff, Provinces: &pf, Owner: owner, Diagnostics: d}, nil
 }

@@ -70,13 +70,20 @@ func Cover(dom Domain, cols, rows int, s Shape) []bool {
 	return out
 }
 
-// Preview colors: provisional ocean and land in neutral tones, then one tint
-// per feature type, then backbones.
+// Preview colors: a pale tone per province type, darker lines for province
+// boundaries and the provisional coast, one tint per feature type, and
+// backbones.
 var (
-	previewOcean = color.RGBA{214, 224, 232, 255}
-	previewLand  = color.RGBA{236, 232, 220, 255}
-	previewLine  = color.RGBA{40, 30, 30, 255}
-	previewTint  = map[string]color.RGBA{
+	previewProvince = map[string]color.RGBA{
+		TypeOceanic:     {214, 224, 232, 255},
+		TypeShield:      {236, 226, 206, 255},
+		TypeSedimentary: {228, 236, 208, 255},
+		TypeVolcanic:    {240, 212, 206, 255},
+	}
+	previewBoundary = color.RGBA{176, 170, 156, 255}
+	previewCoast    = color.RGBA{120, 130, 140, 255}
+	previewLine     = color.RGBA{40, 30, 30, 255}
+	previewTint     = map[string]color.RGBA{
 		TypeMountainBelt: {150, 90, 50, 255},
 		TypeRift:         {190, 60, 120, 255},
 		TypeIslandArc:    {210, 120, 30, 255},
@@ -86,8 +93,9 @@ var (
 	}
 )
 
-// writePreview draws the provisional land, each feature's envelope, and each
-// backbone, sampling every scale-th cell.
+// writePreview draws provinces by type, province boundaries, the provisional
+// coast, each feature's envelope, and each backbone, sampling every scale-th
+// cell.
 func writePreview(ctx context.Context, path string, r *Result, scale int) error {
 	g := r.Manifest.Grid
 	dom := r.Domain()
@@ -97,9 +105,16 @@ func writePreview(ctx context.Context, path string, r *Result, scale int) error 
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	for y := range h {
 		for x := range w {
-			c := previewOcean
-			if r.Land[y*scale*g.Columns+x*scale] == 1 {
-				c = previewLand
+			// Compare with the next sampled cell east and south, wrapping.
+			i := y*scale*g.Columns + x*scale
+			e := y*scale*g.Columns + (x+1)%w*scale
+			s := (y+1)%h*scale*g.Columns + x*scale
+			c := previewProvince[r.Provinces.Provinces[r.Owner[i]-1].Type]
+			switch {
+			case r.Land[i] != r.Land[e] || r.Land[i] != r.Land[s]:
+				c = previewCoast
+			case r.Owner[i] != r.Owner[e] || r.Owner[i] != r.Owner[s]:
+				c = previewBoundary
 			}
 			img.SetRGBA(x, y, c)
 		}

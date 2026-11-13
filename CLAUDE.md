@@ -41,7 +41,7 @@ Contracts and invariants (wrapping, determinism, land fraction, artifact formats
    See [cmd/landmask/README.md](cmd/landmask/README.md).
 
 3. `cmd/structure`: attaches geological features (belts, rifts, arcs, faults, plateaus, basins) to a `continents` artifact and writes a self-contained structure checkpoint.
-   So far it takes features only from an explicit fixture file; provinces, automatic placement, rock classification, and recentering are not implemented.
+   It partitions the map into geological provinces. So far it takes features only from an explicit fixture file; automatic placement, rock classification, and recentering are not implemented.
    See [cmd/structure/README.md](cmd/structure/README.md).
 
 Later stages (terrain, the terrain-based landmask, drainage, climate, biomes, resources) are not implemented yet.
@@ -54,7 +54,7 @@ The planned generation order is `continents → structure → terrain → landma
 - `internal/fracture`: the disc-sum fracture field generator and recentering.
 - `internal/continent`: storing and loading the continental artifact.
 - `internal/landmask`: creating, storing, and loading the land/ocean artifact.
-- `internal/structure`: feature records and their validation, toroidal geometry queries, and the structure artifact.
+- `internal/structure`: feature records and their validation, toroidal geometry queries, province partitioning, and the structure artifact.
 - `internal/artifact`: helpers shared by packages that publish artifact directories.
 - `internal/prng`: reproducible random streams derived from a seed and a domain name.
 - `internal/cerrs`: constant sentinel errors.

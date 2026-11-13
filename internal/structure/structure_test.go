@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -96,7 +97,7 @@ func TestRoundTrip(t *testing.T) {
 	sameFiles(t, before, files(t, in))
 
 	got := files(t, first)
-	for _, name := range []string{"manifest.json", "features.json", "diagnostics.json", "provisional-land.u8", "affinity.f32", "continental.f32", "coast.f32", "preview.png"} {
+	for _, name := range []string{"manifest.json", "features.json", "diagnostics.json", "provinces.json", "provinces.u32", "provisional-land.u8", "affinity.f32", "continental.f32", "coast.f32", "preview.png"} {
 		if _, ok := got[name]; !ok {
 			t.Errorf("missing %s", name)
 		}
@@ -123,7 +124,7 @@ func TestLoad(t *testing.T) {
 	}
 	m := r.Manifest
 	if m.Format != structure.Format || m.Mode != structure.ModeFixture || m.Seed != 7 || m.SeedSource != structure.SeedExplicit ||
-		m.Provinces != structure.Absent || m.RockClassification != structure.Absent {
+		m.RockClassification != structure.Absent {
 		t.Errorf("manifest: %+v", m)
 	}
 	if m.FeatureCount != 7 || len(r.Features.Features) != 7 || r.Diagnostics.Placed[structure.TypeBasin] != 2 {
@@ -133,6 +134,19 @@ func TestLoad(t *testing.T) {
 	belt, rift := r.Features.Features[0], r.Features.Features[2]
 	if belt.Maturity == nil || *belt.Maturity != 0 || rift.Key == nil || *rift.Key != 1<<64-1 {
 		t.Errorf("maturity %v, key %v", belt.Maturity, rift.Key)
+	}
+	// Features list the provinces under their envelopes, in ascending order.
+	if len(r.Provinces.Provinces) != m.ProvinceCount || m.ProvinceCount == 0 {
+		t.Errorf("%d provinces, manifest %d", len(r.Provinces.Provinces), m.ProvinceCount)
+	}
+	for _, f := range r.Features.Features {
+		if len(f.Provinces) == 0 || !slices.IsSorted(f.Provinces) || int(f.Provinces[len(f.Provinces)-1]) > m.ProvinceCount {
+			t.Errorf("feature %d provinces %v", f.ID, f.Provinces)
+		}
+	}
+	// The fault's first vertex lies in a province the fault lists.
+	if o := r.Owner[int(50/6)*96+int(50/6)]; !slices.Contains(r.Features.Features[3].Provinces, o) {
+		t.Errorf("fault does not list province %d under its first vertex", o)
 	}
 	land := 0
 	for _, v := range r.Land {
@@ -150,7 +164,7 @@ func TestLoad(t *testing.T) {
 	if err := structure.Write(t.Context(), out, r, 0); err == nil {
 		t.Error("replaced an existing artifact")
 	}
-	for _, name := range []string{structure.FeaturesFile, structure.MaskFile, structure.DiagnosticsFile, "coast.f32"} {
+	for _, name := range []string{structure.FeaturesFile, structure.MaskFile, structure.DiagnosticsFile, structure.ProvincesFile, structure.OwnershipFile, "coast.f32"} {
 		path := filepath.Join(out, name)
 		b, err := os.ReadFile(path)
 		if err != nil {

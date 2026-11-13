@@ -86,7 +86,8 @@ Neither it nor zero affinity is an authoritative sea-level threshold.
 At a working spacing near 50 km, derive the provisional land coverage, coastline distance, and contiguous continental regions.
 Retain actual coarse spacing so the coarse grid tiles the physical extent.
 Coarse cells summarize coverage rather than relying on a single sample that could erase a small island.
-Label full-resolution components so islands omitted by coarse simplification can still receive ownership and local treatment.
+Label full-resolution components on the torus: land regions are eight-connected and ocean regions four-connected.
+A fracture mask at full size has tens of thousands of single-cell islands and enclosed waters, so provinces are built on a simplified mask; see the province rules in the version one schema.
 
 Distances are physical distances on the torus.
 Approximate eight-neighbor graph distances are acceptable if their approximation is recorded.
@@ -339,7 +340,9 @@ All streams use `prng.New(seed, domain, sequence)` with the structure seed and t
 
 | Domain | Sequence | Use |
 | --- | --- | --- |
-| `structure-v1/provinces` | 0 | Province seeds and growth costs |
+| `structure-v1/provinces/seeds` | Landmass number | Province seed positions within one landmass |
+| `structure-v1/provinces/cost` | 0 | The smooth field in the growth cost |
+| `structure-v1/provinces/types` | 0 | Volcanic draws, one per land province in ID order |
 | `structure-v1/requests` | 0 | Event counts and request attributes |
 | `structure-v1/place/<type>` | Request index within the type | All candidate attempts for one requested event |
 
@@ -362,14 +365,35 @@ Terrain derives a feature's detail stream from the terrain seed, a terrain domai
 
 - `type` is `shield`, `sedimentary`, `volcanic`, or `oceanic`.
    Belt-related context comes from features, not from province types.
-- `component` is the provisional land component the province belongs to, numbered from 1 in order of each component's lowest row-major cell index; 0 for oceanic provinces.
+- `component` is the landmass of the simplified mask the province belongs to, numbered from 1 in order of each landmass's lowest row-major cell index; 0 for oceanic provinces.
 - `provinces.u32` is the ownership raster: little-endian uint32, full resolution, row-major.
    Every cell has a nonzero ID.
-   Each connected region of provisional ocean is one `oceanic` province.
+   Each connected ocean region of the simplified mask is one `oceanic` province.
 
 This differs from the cylindrical specification in two accepted ways: ocean cells are owned, where that specification partitions only continental area, and collision, old orogen, active margin, and rift are features only, not province types.
 
-Until step 2 lands, a fixture artifact declares provinces absent in its manifest and omits both files, in the same way it declares rock classification absent.
+Provinces follow these rules, named `provinces-v1`. Their numeric values are calibration defaults recorded in the manifest.
+
+1. **Simplify the mask.**
+   Turn every enclosed water smaller than 20,000 square km to land, then every landmass smaller than 20,000 square km to ocean.
+   The provisional mask itself is saved unchanged; only province ownership uses the simplified one.
+   So a small island belongs to the ocean province around it and a small lake to the land province around it, and neither is lost from the mask.
+2. **Seed.**
+   A landmass gets one seed per 1.5 million square km, at least one.
+   Seeds are chosen on a grid of about 50 km spacing that tiles the domain: the first at random, each later one farthest from those already chosen, with a random factor between 0.75 and 1.25 on the distance.
+3. **Grow.**
+   Each land cell goes to the seed that reaches it most cheaply through eight-connected land, at full resolution, so every province is connected and none crosses water.
+   Leaving a cell costs the step length times a factor from 1 to 1.6, taken from a smooth field.
+   The smooth field is a fracture field built on the 50 km grid, scaled to the range 0 to 1.
+   Equal costs go to the lower province ID.
+4. **Type.**
+   Rank a landmass's provinces by the mean of the `continental` field over their cells.
+   The upper half are `shield` and the rest `sedimentary`.
+   A landmass that is a single province is `shield` when its mean is at least the mean over all land.
+   Each land province then has a 4 percent chance of becoming `volcanic`; step 3 can replace this draw with proximity to arcs and rifts.
+   Continental affinity is a layout value, so this is a plausible proxy, not a derivation.
+
+Province IDs run from 1: landmasses in order, each landmass's provinces in seed order, then ocean regions in order.
 
 ### Geometry queries
 
@@ -441,6 +465,7 @@ Evaluate structural placement before adding terrain noise.
 1. Define feature records, physical geometry queries, artifact storage, and an explicit fixture input.
    Prove the handoff to terrain on fixed features before tuning automatic placement.
 2. Add provisional coast interpretation and province ownership.
+   Component labels and provinces are done; coast chains and coast distance wait for step 3, where margin and arc placement define what they must provide.
 3. Add bounded, seeded automatic event placement and diagnostic previews.
 4. Specify geological proxy conversion and implement rock classification as its own deterministic substep.
 5. Add optional complete-result recentering after the coordinate and seam contracts are verified.
