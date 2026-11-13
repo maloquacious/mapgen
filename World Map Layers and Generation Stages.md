@@ -80,6 +80,67 @@ Examples: volcanic rocks, sedimentary basins, geological provinces, iron ore dep
 
 Keep resource occurrence separate from resource discovery, mining, and ownership. Those are game-state concerns. Resource placement can use geological context without requiring a full geological simulation.
 
+#### Rock types
+
+Each cell has one dominant rock type, including cells under water.
+
+| Rock type | Typical setting |
+| --- | --- |
+| Igneous | Near plate boundaries, reaching further inland at convergent boundaries, and in scattered volcanic provinces |
+| Metamorphic | Along boundaries where plates collide or slide past each other |
+| Sedimentary | Quiet plate interiors and basins |
+
+Chosen in this order:
+
+|    Rock     |                                                  Rule                                                  | Share of land |
+|-------------|--------------------------------------------------------------------------------------------------------|---------------|
+| Metamorphic | (\|pressure\| + \|shear\|)/2 + (2·rv − 1) >= limit (limit is 0.09 at transform boundaries, 0.10 otherwise) | 42%           |
+| Igneous     | otherwise, if rv > 0.4 or igneous_chance > 0.25                                                        | 37%           |
+| Sedimentary | everything else                                                                                        | 21%           |
+
+- Inputs: pressure and shear come from how hard plates push against or slide along nearby boundaries, and fade with distance.
+  rv is 4-octave noise, scaled and squared. igneous_chance is high close to a boundary and reaches further out at convergent boundaries.
+- In practice: metamorphic rock follows stressed boundaries, igneous rock sits near boundaries and in noise patches, and sedimentary rock fills the quiet interiors.
+
+#### Ore types
+
+A cell holds at most one ore, or none. Most cells hold none. Which ores can occur depends on the cell's rock type:
+
+| Ore | Sedimentary | Igneous | Metamorphic |
+| --- | --- | --- | --- |
+| Coal | Yes | | |
+| Copper | Yes | Yes | Yes |
+| Tin | Yes | Yes | |
+| Iron | Yes | Yes | |
+| Gold | Yes | | Yes |
+| Diamond | Yes | Yes | Yes |
+| Platinum | | Yes | |
+| Aluminum | | Yes | |
+| Silver | | Yes | Yes |
+| Lead | | | Yes |
+
+In code, keep "unclassified" (not yet generated) distinct from "none" (generated, no ore present) for both rock and ore.
+
+A cell has no ore when ov is between 0.325 and 0.675. Otherwise the ore depends on the rock type and on ov2 = (ov + rv)/2, taking the first row where ov2 is below the limit:
+
+|  Sedimentary  |     Igneous     |  Metamorphic  |
+|---------------|-----------------|---------------|
+| < 0.28 coal   | < 0.22 copper   | < 0.28 copper |
+| < 0.35 copper | < 0.28 platinum | < 0.36 lead   |
+| < 0.45 tin    | < 0.37 aluminum | < 0.51 silver |
+| < 0.50 iron   | < 0.46 iron     | < 0.62 gold   |
+| < 0.58 gold   | < 0.55 silver   | < 0.67 none   |
+| else diamond  | < 0.62 tin      | else diamond  |
+|               | else diamond    |               |
+
+That gives 10 ores in total: coal, copper, tin, iron, gold, diamond, platinum, aluminum, silver and lead.
+
+- Frequency: 16% of land cells carry ore. Silver, aluminum and tin are the most common; platinum and lead are the rarest.
+- Ocean: ocean cells get ore too.
+- Planned type: the doc says to make ore a typed enum where zero means "unclassified" and a separate value means "none".
+- Odd gap: the metamorphic "none" band from 0.62 to 0.67 is copied from the source. The doc says to keep it but note that it may not be intended.
+
+
 ## Examples of overlapping layers
 
 A cell has several properties at once. These examples illustrate combinations, not exhaustive terrain classes.
@@ -103,11 +164,11 @@ The following is a starting workflow, not a fixed algorithm:
 | Stage | Main result | Example of what the user can vary |
 | --- | --- | --- |
 | 1. World layout | Continents, islands, ocean and land distribution | Continental seed while retaining world dimensions and target land fraction |
-| 2. Geological structure and terrain | Geological regions, mountain systems, elevation and relief | Mountain layout while retaining accepted continents |
+| 2. Geological structure and terrain | Geological regions, rock types, mountain systems, elevation and relief | Mountain layout while retaining accepted continents |
 | 3. Drainage preparation | Drainage routes, basins, candidate lakes, any required terrain corrections | Drainage alternatives while retaining the accepted terrain input |
 | 4. Climate and water balance | Climate, runoff, river flow, lake and wetland conditions | Climate alternatives while retaining accepted terrain and drainage |
 | 5. Ecosystems and surface cover | Biomes, vegetation, exposed ground, snow and ice | Ecological variation consistent with accepted physical conditions |
-| 6. Mineral resources | Resource occurrences | Deposit placement while retaining accepted geology and surface world |
+| 6. Mineral resources | Ore occurrences, chosen by rock type | Deposit placement while retaining accepted geology and surface world |
 
 Stages have dependencies, not merely a numerical order. Resource placement may depend on geology without depending on vegetation. Snow cover depends on climate; drainage routes depend on terrain; river flow also depends on precipitation. A stage need not use randomness if its inputs determine its result.
 
