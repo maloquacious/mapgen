@@ -20,7 +20,8 @@ continents → structure → terrain → landmask → drainage → climate → e
 A user accepts each checkpoint independently and can vary the next stage without regenerating accepted inputs.
 
 This is a design for a static procedural model, not a simulation of moving plates or geological history.
-It refines the province and event approach in the cylindrical generator specification. Numerical defaults remain calibration choices.
+It refines the province and event approach in the cylindrical generator specification.
+Numerical defaults remain calibration choices.
 
 ## What accepting structure means
 
@@ -182,7 +183,8 @@ Do not silently label a procedural proxy as measured stress or reuse unrelated n
 
 Once that conversion is specified, rock classification can be a deterministic substep of `structure` with its own random stream.
 It must cover ocean and continental cells, distinguish unclassified from classified absence, and preserve the layer reference's rock and ore eligibility rules.
-Any change to that recipe must be explicit. The percentages quoted in the reference are not acceptance targets established for this new model.
+Any change to that recipe must be explicit.
+The percentages quoted in the reference are not acceptance targets established for this new model.
 
 The first structural fixture implementation can publish geological regions and events before rock classification is ready.
 Such an artifact must declare rock classification absent; resource generation must reject missing required rock inputs.
