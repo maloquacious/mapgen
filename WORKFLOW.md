@@ -8,8 +8,7 @@ What we are building, and its scope, are in [CLAUDE.md](CLAUDE.md). Read it befo
 ## Priorities
 
 Fix bugs before adding features.
-When proposing what to work on next, first check for open bugs.
-The repository has no GitHub remote yet; once it does, use `gh issue list --label bug --state open`.
+When proposing what to work on next, first check for open bugs (`gh issue list --label bug --state open`).
 If any are open, propose working on them instead of new features or documentation.
 An explicit request from the user takes precedence; do the requested work.
 
@@ -72,8 +71,7 @@ The model is verified in Go, by tests.
 
 - Commit directly to `main`.
   No feature branches or pull requests; history is the recovery mechanism.
-- Agents are authorized to commit each task as it is completed, provided all checks pass and Go code changes include a version bump.
-- The repository has no remote yet. Once `origin` exists, agents are authorized to push each completed task to it.
+- Agents are authorized to commit and push each task to `origin` as it is completed, provided all checks pass and Go code changes include a version bump.
 - Agents are authorized to create GitHub labels as needed.
 
 ## CI
