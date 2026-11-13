@@ -7,4 +7,5 @@
 *.zip
 .DS_Store
 .idea/
+notes.txt
 tmp/
