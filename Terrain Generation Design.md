@@ -93,6 +93,7 @@ It follows section 5 of the cylindrical specification, built from the provisiona
 Compute the exact signed distance from every cell center to the nearest land/water interface of the unsimplified provisional mask, on the torus: positive on land, negative on water, half a cell at a coastal cell center.
 This is a full-resolution transform (for example, the Felzenszwalb–Huttenlocher squared-distance transform run on both periodic axes), not structure's 50 km working-grid distance.
 The working grid would round the fracture coastline away, and the unsimplified mask keeps small islands and small enclosed waters that the province rules dropped.
+The interface nearest a cell center is the nearest point of the nearest cell of the other kind, and the squared distance to a cell's square separates by axis, so the transform runs as Felzenszwalb–Huttenlocher's two passes; the squared distance to a square is convex but not a parabola, so the row pass finds each envelope crossing by binary search.
 
 **Land profile.**
 Land rises from 0 m at the coast through a coastal plain to an interior base level:
@@ -103,7 +104,9 @@ land(d) = B * smoothstep(0, Rin, d)
 
 `d` is the coast distance in km, `Rin` the rise distance, default 250 km, and `B` the interior base level at that cell.
 `B` comes from the province: `shield` 300–600 m, `sedimentary` 100–300 m, `volcanic` 400–800 m, each province's value drawn once from its own stream.
-Per-province values are placed on the working grid, smoothed with a 150 km Gaussian on the torus so province boundaries do not show as steps, and interpolated bilinearly to cells.
+Per-province values are placed on the working grid, smoothed with a 150 km Gaussian (standard deviation, cut off at three) on the torus so province boundaries do not show as steps, and interpolated bilinearly to cells.
+Only land provinces contribute: the smoothed level is the Gaussian-weighted mean of nearby land provinces' levels, so oceanic provinces do not pull coastal interiors down.
+Land beyond the kernel's reach of any land province, a small island in an oceanic province, uses an island base level, default 200 m.
 A small smooth fracture field adds ±15 percent of `B`, with wavelengths no shorter than 400 km, so interiors are not uniformly flat.
 
 **Water profile.**
@@ -116,9 +119,10 @@ plain:  −A                beyond
 ```
 
 `S` is the shelf-break depth, 50–200 m; `W` the shelf width, 50–200 km; `Rs` the slope width, default 150 km; and `A` the abyssal depth, 3,500–5,500 m.
-Each comes from its own smooth field on the working grid.
+Each comes from its own smooth field: a fracture field on a grid of half the minimum wavelength (200 km), with disc radii from 200 to 400 km, normalized to [0,1] by its extremes and sampled bilinearly on the torus, like the interior variation field.
 Each segment joins the next with a smoothstep, so the profile has no kinks.
 Within the stress reach of an active margin or island arc, the shelf width is reduced toward 50 km: margins facing a trench have narrow shelves.
+This depends on features, so it lands with step 2 rather than step 1.
 Water enclosed by land gets the same profile; a small enclosed water is a shallow depression, which `landmask` will not join to the ocean, and which drainage may keep as a lake.
 
 **No coast.**
@@ -341,7 +345,7 @@ The terrain-mode artifact carries the clamped elevation, high, and relief fields
 
 ## Implementation order
 
-1. **Foundation and artifact.**
+1. **Foundation and artifact.** Done; see `cmd/terrain/README.md`.
    Full-resolution torus distance transform, land and water profiles, province base levels, the artifact with `Load`, `preview.png`, and the foundation tests.
    No features yet: the provisional land is exactly the land above 0 m.
 2. **Regional surface on fixtures.**

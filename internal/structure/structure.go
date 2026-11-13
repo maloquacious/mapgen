@@ -414,6 +414,34 @@ func Load(ctx context.Context, dir string) (*Result, error) {
 	if err := json.Unmarshal(data, &m); err != nil {
 		return nil, fmt.Errorf("%s: %w", ManifestFile, err)
 	}
+	return load(ctx, dir, m, true)
+}
+
+// LoadRecords reads, from dir, the structure records that a later stage's
+// artifact retains, as m describes them: the provisional mask, features,
+// provinces, and rock classification, each verified as Load verifies it.
+// It reads neither the continental fields nor the diagnostics, which later
+// stages do not keep; the result's Fields and Diagnostics are empty.
+func LoadRecords(ctx context.Context, dir string, m Manifest) (*Result, error) {
+	return load(ctx, dir, m, false)
+}
+
+// Records lists the files LoadRecords reads, with their checksums, in a
+// fixed order.
+func (m *Manifest) Records() []File {
+	out := []File{m.ProvisionalLand, m.Features, m.Provinces, m.ProvinceOwnership}
+	if m.Rock != nil {
+		out = append(out, *m.Rock)
+	}
+	for _, fd := range m.GeologyFields {
+		out = append(out, File{File: fd.File, Format: fd.DType + " " + fd.ByteOrder, SHA256: fd.SHA256, Description: fd.Description})
+	}
+	return out
+}
+
+// load verifies the artifact in dir against m. full also reads the
+// continental fields and diagnostics.
+func load(ctx context.Context, dir string, m Manifest, full bool) (*Result, error) {
 	if m.Format != Format {
 		return nil, fmt.Errorf("unsupported structure format %q", m.Format)
 	}
@@ -484,19 +512,19 @@ func Load(ctx context.Context, dir string) (*Result, error) {
 	if err := pf.validate(owner); err != nil {
 		return nil, err
 	}
-	ddata, err := read(m.Diagnostics, DiagnosticsFile)
-	if err != nil {
-		return nil, err
+	r := &Result{Manifest: m, Land: land, Features: ff, Provinces: &pf, Owner: owner}
+	if full {
+		ddata, err := read(m.Diagnostics, DiagnosticsFile)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(ddata, &r.Diagnostics); err != nil {
+			return nil, fmt.Errorf("%s: %w", DiagnosticsFile, err)
+		}
+		if r.Fields, err = continent.ReadFields(ctx, dir, &continent.Manifest{Grid: g, Fields: m.Fields}); err != nil {
+			return nil, err
+		}
 	}
-	var d Diagnostics
-	if err := json.Unmarshal(ddata, &d); err != nil {
-		return nil, fmt.Errorf("%s: %w", DiagnosticsFile, err)
-	}
-	fields, err := continent.ReadFields(ctx, dir, &continent.Manifest{Grid: g, Fields: m.Fields})
-	if err != nil {
-		return nil, err
-	}
-	r := &Result{Manifest: m, Land: land, Fields: fields, Features: ff, Provinces: &pf, Owner: owner, Diagnostics: d}
 	switch m.RockClassification {
 	case Absent:
 		if m.Rock != nil || m.GeologyFields != nil || m.RockParameters != nil {
