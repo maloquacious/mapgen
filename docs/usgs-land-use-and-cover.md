@@ -50,3 +50,5 @@
 A mapping unit having a minimum size of 10 acres (4 hectares) is the smallest area mapped for all urban areas and bodies of water.
 It is also the minimum area mapped for surface mines, quarries, gravel pits, and certain agricultural areas.
 A minimum mapping unit of 40 acres (16 hectares) is used for all other categories.
+
+Source: USGS land use and land cover classification, Levels I and II (Anderson et al., 1976).
