@@ -2,15 +2,17 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Package terrain creates, stores, and loads the terrain artifact: ground and
-// seabed elevation from an accepted structure checkpoint. See "Terrain
-// Generation Design.md".
+// seabed elevation from an accepted trench checkpoint, which carries the
+// structure records and the trench records. See "Terrain Generation
+// Design.md".
 //
 // The domain is a torus, as in every stage before climate. Elevations are
 // meters relative to a provisional datum, the provisional coast at 0 m, not
 // sea level; landmask chooses sea level later.
 //
 // So far it builds the continental foundation, the surface with no
-// features, and publishes it with the structure records it retains.
+// features, and publishes it with the structure and trench records it
+// retains.
 // Feature synthesis, ridges, subcell rasterization, residual detail, and
 // recentering are later steps of the design.
 package terrain
@@ -34,15 +36,16 @@ import (
 	"github.com/maloquacious/mapgen/internal/fracture"
 	"github.com/maloquacious/mapgen/internal/prng"
 	"github.com/maloquacious/mapgen/internal/structure"
+	"github.com/maloquacious/mapgen/internal/trench"
 )
 
 const (
-	Format          = "mapgen-terrain-v1"
+	Format          = "mapgen-terrain-v2"
 	Topology        = "torus: x and y wrap; the map may be recentered until climate"
-	Datum           = "provisional: 0 m is the provisional coast of the structure input, not sea level"
+	Datum           = "provisional: 0 m is the provisional coast of the structure records, not sea level"
 	Absent          = "absent"
 	SeedExplicit    = "explicit"
-	SeedFromInput   = "structure input"
+	SeedFromInput   = "trench input"
 	ManifestFile    = "manifest.json"
 	DiagnosticsFile = "diagnostics.json"
 	PreviewFile     = "preview.png"
@@ -64,10 +67,11 @@ var fieldDescriptions = map[string]string{
 // File describes one saved file other than a terrain field.
 type File = structure.File
 
-// Input identifies the structure checkpoint by content, not location.
+// Input identifies the trench checkpoint by content, not location. Its
+// manifest records the structure checkpoint in turn.
 type Input struct {
-	ManifestSHA256 string             `json:"manifest_sha256"`
-	Manifest       structure.Manifest `json:"manifest"`
+	ManifestSHA256 string          `json:"manifest_sha256"`
+	Manifest       trench.Manifest `json:"manifest"`
 }
 
 // Manifest describes a terrain artifact. It holds only canonical generation
@@ -90,8 +94,8 @@ type Manifest struct {
 	// surface is the foundation alone, so HighM equals ElevationM and
 	// ReliefM is 0.
 	FeatureSynthesis string `json:"feature_synthesis"`
-	// Retained lists the structure records copied unchanged, as the input
-	// manifest describes them.
+	// Retained lists the structure and trench records copied unchanged, as
+	// the input manifest describes them.
 	Retained    []File            `json:"retained"`
 	Diagnostics File              `json:"diagnostics"`
 	Fields      []continent.Field `json:"fields"`
@@ -127,7 +131,8 @@ type Diagnostics struct {
 // Result keeps everything in the input's coordinates.
 type Result struct {
 	Manifest  Manifest
-	Structure *structure.Result // retained records; no continental fields
+	Structure *structure.Result  // retained records; no continental fields
+	Trenches  *trench.TrenchFile // retained trench records
 	Elevation []float32
 	High      []float32
 	Relief    []float32
@@ -140,33 +145,37 @@ type Result struct {
 
 // Options are the inputs to Generate.
 type Options struct {
-	In      string  // structure artifact directory
-	Seed    *uint64 // terrain seed; nil uses the structure seed
+	In      string  // trench artifact directory
+	Seed    *uint64 // terrain seed; nil uses the trench seed
 	Version string  // generator version
 }
 
 func checksum(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 
-// Generate reads and verifies the structure input and builds the terrain.
+// Generate reads and verifies the trench input and builds the terrain.
 // The input is never changed and its path is not recorded.
 func Generate(ctx context.Context, o Options) (*Result, error) {
-	data, err := os.ReadFile(filepath.Join(o.In, structure.ManifestFile))
+	data, err := os.ReadFile(filepath.Join(o.In, trench.ManifestFile))
 	if err != nil {
 		return nil, err
 	}
-	var sm structure.Manifest
-	if err := json.Unmarshal(data, &sm); err != nil {
-		return nil, fmt.Errorf("input %s: %w", structure.ManifestFile, err)
+	var tm trench.Manifest
+	if err := trench.CheckFormat(data); err != nil {
+		return nil, fmt.Errorf("input: %w", err)
 	}
-	s, err := structure.LoadRecords(ctx, o.In, sm)
+	if err := json.Unmarshal(data, &tm); err != nil {
+		return nil, fmt.Errorf("input %s: %w", trench.ManifestFile, err)
+	}
+	tr, err := trench.LoadRecords(ctx, o.In, tm)
 	if err != nil {
 		return nil, fmt.Errorf("input: %w", err)
 	}
-	records, err := readRecords(o.In, sm.Records())
+	records, err := trench.ReadRecords(o.In, tm.Records())
 	if err != nil {
 		return nil, fmt.Errorf("input: %w", err)
 	}
-	seed, source := sm.Seed, SeedFromInput
+	s, sm := tr.Structure, tm.Input.Manifest
+	seed, source := tm.Seed, SeedFromInput
 	if o.Seed != nil {
 		seed, source = *o.Seed, SeedExplicit
 	}
@@ -175,13 +184,13 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 	r := &Result{
 		Manifest: Manifest{
 			Format: Format, GeneratorVersion: o.Version,
-			Input: Input{ManifestSHA256: checksum(data), Manifest: sm},
+			Input: Input{ManifestSHA256: checksum(data), Manifest: tm},
 			Seed:  seed, SeedSource: source, SeedDerivation: prng.DerivationVersion, PRNG: prng.Algorithm,
 			Grid: g, Topology: Topology, Datum: Datum,
 			ProvisionalLandFraction: sm.ProvisionalLandFraction, ProvisionalLandCells: sm.ProvisionalLandCells,
-			FoundationParameters: p, FeatureSynthesis: Absent, Retained: sm.Records(),
+			FoundationParameters: p, FeatureSynthesis: Absent, Retained: tm.Records(),
 		},
-		Structure: s, records: records,
+		Structure: s, Trenches: tr.Trenches, records: records,
 	}
 	dist, err := coastDistance(ctx, s.Land, g.Columns, g.Rows, g.CellWidthKM, g.CellHeightKM)
 	if err != nil {
@@ -198,25 +207,6 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 	r.Relief = make([]float32, len(r.Elevation))
 	r.diagnose()
 	return r, ctx.Err()
-}
-
-// readRecords reads the named files of dir and checks their checksums.
-func readRecords(dir string, files []File) (map[string][]byte, error) {
-	out := map[string][]byte{}
-	for _, f := range files {
-		if filepath.Base(f.File) != f.File || f.File == "." || f.File == ".." {
-			return nil, fmt.Errorf("invalid record file name %q", f.File)
-		}
-		b, err := os.ReadFile(filepath.Join(dir, f.File))
-		if err != nil {
-			return nil, err
-		}
-		if checksum(b) != f.SHA256 {
-			return nil, fmt.Errorf("%s: checksum mismatch", f.File)
-		}
-		out[f.File] = b
-	}
-	return out, nil
 }
 
 // diagnose derives Above and the diagnostics from the fields.
@@ -389,18 +379,18 @@ func Load(ctx context.Context, dir string) (*Result, error) {
 	if m.FeatureSynthesis != Absent {
 		return nil, fmt.Errorf("unsupported feature synthesis %q", m.FeatureSynthesis)
 	}
-	sm := m.Input.Manifest
-	if !slices.Equal(m.Retained, sm.Records()) {
+	tm := m.Input.Manifest
+	if !slices.Equal(m.Retained, tm.Records()) {
 		return nil, fmt.Errorf("retained records do not match the input manifest")
 	}
-	if m.Grid != sm.Grid || m.ProvisionalLandCells != sm.ProvisionalLandCells {
+	if m.Grid != tm.Grid || m.ProvisionalLandCells != tm.Input.Manifest.ProvisionalLandCells {
 		return nil, fmt.Errorf("grid or provisional land does not match the input manifest")
 	}
-	s, err := structure.LoadRecords(ctx, dir, sm)
+	tr, err := trench.LoadRecords(ctx, dir, tm)
 	if err != nil {
 		return nil, err
 	}
-	records, err := readRecords(dir, m.Retained)
+	records, err := trench.ReadRecords(dir, m.Retained)
 	if err != nil {
 		return nil, err
 	}
@@ -414,7 +404,7 @@ func Load(ctx context.Context, dir string) (*Result, error) {
 	if checksum(ddata) != m.Diagnostics.SHA256 {
 		return nil, fmt.Errorf("%s: checksum mismatch", DiagnosticsFile)
 	}
-	r := &Result{Manifest: m, Structure: s, records: records}
+	r := &Result{Manifest: m, Structure: tr.Structure, Trenches: tr.Trenches, records: records}
 	if err := json.Unmarshal(ddata, &r.Diagnostics); err != nil {
 		return nil, fmt.Errorf("%s: %w", DiagnosticsFile, err)
 	}

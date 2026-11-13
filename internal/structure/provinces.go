@@ -425,6 +425,14 @@ func touched(dom Domain, cols, rows int, s Shape, owner []uint32) []uint32 {
 }
 
 // simplify applies simplifyMask with the province parameters' minimum area.
+// Simplify returns the provisional mask as provinces and the coast see it:
+// land and water regions smaller than p.MinAreaKM2 flipped. Later stages
+// use it to look past specks and puddles as structure does.
+func Simplify(p ProvinceParams, g continent.Grid, land []byte) []byte {
+	mask, _ := simplify(p, g, land)
+	return mask
+}
+
 func simplify(p ProvinceParams, g continent.Grid, land []byte) ([]byte, *components) {
 	return simplifyMask(land, g.Columns, g.Rows, int(math.Ceil(p.MinAreaKM2/(g.CellWidthKM*g.CellHeightKM))))
 }

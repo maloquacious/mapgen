@@ -1,11 +1,12 @@
 # Terrain command
 
-Build ground and seabed elevation from a structure artifact and save a terrain checkpoint.
+Build ground and seabed elevation from a trench artifact and save a terrain checkpoint.
 
 ```sh
 go run ./cmd/continents --seed 42 --out tmp/continents
 go run ./cmd/structure --in tmp/continents --out tmp/structure
-go run ./cmd/terrain --in tmp/structure --png-scale 3 --out tmp/terrain
+go run ./cmd/trench --in tmp/structure --out tmp/trench
+go run ./cmd/terrain --in tmp/trench --png-scale 3 --out tmp/terrain
 ```
 
 The design is in [Terrain Generation Design.md](<../../Terrain Generation Design.md>).
@@ -14,7 +15,7 @@ The surface is the foundation alone, so the provisional land is exactly the cell
 
 ## Not implemented yet
 
-- Feature synthesis: belts, ridges, plateaus, basins, rifts, arcs, and faults (`feature_synthesis` is `absent`; `high` equals `elevation` and `relief` is 0).
+- Feature synthesis: belts, ridges, plateaus, basins, rifts, arcs, faults, and trench depressions (`feature_synthesis` is `absent`; `high` equals `elevation` and `relief` is 0).
 - Narrower shelves facing active margins and island arcs, which depend on features.
 - `ridges.json`, `preview-structure.png`, `preview-relief.png`, and `preview-change.png`.
 - `--residual`, `--recenter`, `--workers`, and `--config`.
@@ -23,16 +24,16 @@ The surface is the foundation alone, so the provisional land is exactly the cell
 
 | Flag | Meaning |
 | --- | --- |
-| `--in` | Structure artifact directory; default `tmp/structure` |
+| `--in` | Trench artifact directory; default `tmp/trench` |
 | `--out` | New output directory; default `tmp/terrain`. An existing one is never replaced |
-| `--seed` | Terrain seed, unsigned 64-bit. If omitted, the structure input's seed is used; the manifest records the seed and which of the two it was |
+| `--seed` | Terrain seed, unsigned 64-bit. If omitted, the trench input's seed is used; the manifest records the seed and which of the two it was |
 | `--png` | Write `preview.png`; default true |
 | `--png-scale` | Sampling interval in cells for `preview.png`; default 1 |
 | `--version` | Print the generator version |
 
 ## The foundation
 
-Elevations are meters relative to a provisional datum: 0 m is the structure's provisional coast, not sea level.
+Elevations are meters relative to a provisional datum: 0 m is the structure records' provisional coast, not sea level.
 
 Every cell gets its exact distance to the provisional coast on the torus, at full resolution, from the unsimplified provisional mask.
 Land rises from 0 m at the coast to an interior base level over 250 km.
@@ -51,9 +52,10 @@ The manifest records every value as `foundation_parameters`.
 
 | File | Content |
 | --- | --- |
-| `manifest.json` | Format `mapgen-terrain-v1`, versions, the input structure manifest and its checksum, seed, grid, datum, parameters, retained records, and checksums |
+| `manifest.json` | Format `mapgen-terrain-v2`, versions, the input trench manifest (which records the structure manifest) and its checksum, seed, grid, datum, parameters, retained records, and checksums |
 | `elevation.f32`, `high.f32`, `relief.f32` | Float32 rasters, row-major, row 0 at the north |
 | `features.json`, `provinces.json`, `provinces.u32`, `provisional-land.u8`, `rock.u8`, `pressure.f32`, `shear.f32`, `igneous.f32`, `rock-noise.f32` | The structure records, byte for byte |
+| `trenches.json` | The trench records, byte for byte |
 | `diagnostics.json` | Elevation and relief statistics on provisional land and water, and the shift at the provisional fraction |
 | `preview.png` | Hypsometric tint with hill shading, and the coast at the provisional fraction as a line |
 

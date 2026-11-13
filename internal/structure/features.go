@@ -291,6 +291,12 @@ func validateFirst(dom Domain, p Point) error {
 	return nil
 }
 
+// ValidateBackbone checks a backbone by the rules of a linear feature's:
+// at least two finite samples with positive widths, the first in the base
+// domain, and no zero-length segment or one spanning half the world. Later
+// stages use it for linear records of their own.
+func ValidateBackbone(dom Domain, b []Sample) error { return validateBackbone(dom, b) }
+
 func validateBackbone(dom Domain, b []Sample) error {
 	if len(b) < 2 {
 		return fmt.Errorf("backbone needs at least two samples")

@@ -1,10 +1,10 @@
 // Copyright (c) 2026 Michael D Henderson.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Command terrain writes a terrain artifact from a structure artifact:
-// ground and seabed elevation relative to the provisional coast.
+// Command terrain writes a terrain artifact from a trench artifact: ground
+// and seabed elevation relative to the provisional coast.
 //
-//	terrain --in tmp/structure --out tmp/terrain
+//	terrain --in tmp/trench --out tmp/terrain
 package main
 
 import (
@@ -36,9 +36,9 @@ func main() {
 
 func run(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("terrain", flag.ContinueOnError)
-	in := fs.String("in", "tmp/structure", "structure input artifact directory")
+	in := fs.String("in", "tmp/trench", "trench input artifact directory")
 	out := fs.String("out", "tmp/terrain", "new output artifact directory (must not exist)")
-	seedFlag := fs.String("seed", "", "terrain seed, unsigned 64-bit (default: the structure input's seed)")
+	seedFlag := fs.String("seed", "", "terrain seed, unsigned 64-bit (default: the trench input's seed)")
 	png := fs.Bool("png", true, "write the previews")
 	scale := fs.Int("png-scale", 1, "preview sampling interval in cells; 1 shows every cell")
 	version := fs.Bool("version", false, "print version and exit")

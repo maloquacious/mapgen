@@ -27,6 +27,7 @@ These documents in the repository root define the design. Read the relevant one 
 - [Cylindrical World Map Generator Specification for Go Coding Agents.md](<Cylindrical World Map Generator Specification for Go Coding Agents.md>): the overall generator; coordinates, wrapping rules, state model, determinism, and the MUST requirements.
 - [Fracture Continent Generator Implementation Specification.md](<Fracture Continent Generator Implementation Specification.md>): the continent source, adapted from mdhender/hamwold at a pinned commit.
 - [Structure Generation Design.md](<Structure Generation Design.md>): geological structure before terrain and final coastline selection, feature records, checkpoints, previews, and integration changes.
+- [Trench Generation Design.md](<Trench Generation Design.md>): subduction polarity of active margins and island arcs, and ocean trench records, between structure and terrain.
 - [Terrain Generation Design.md](<Terrain Generation Design.md>): elevation from accepted structure; the continental foundation, feature synthesis, subcell rasterization, residual detail, the terrain artifact, and the landmask terrain-input mode.
 
 `docs/` holds reference material: research papers (`docs/research/`, PDFs are git-ignored) and the USGS land use classification.
@@ -47,14 +48,18 @@ Contracts and invariants (wrapping, determinism, land fraction, artifact formats
    `--recenter` translates the complete result to center the largest landmass.
    See [cmd/structure/README.md](cmd/structure/README.md).
 
-4. `cmd/terrain`: builds ground and seabed elevation from a `structure` artifact and writes a self-contained terrain checkpoint that retains the structure records.
+4. `cmd/trench`: decides which side of each active margin and island arc subducts and places ocean trenches there, from a `structure` artifact, and writes a self-contained trench checkpoint that retains the structure records.
+   Active margins subduct opposite their elevated flank; arcs toward the more open water. Trenches follow the parent offshore and are cut where land (ignoring islands under structure's province minimum) or other features are in the way.
+   See [cmd/trench/README.md](cmd/trench/README.md).
+
+5. `cmd/terrain`: builds ground and seabed elevation from a `trench` artifact and writes a self-contained terrain checkpoint that retains the structure and trench records.
    So far it builds only the continental foundation (step 1 of the terrain design): an exact full-resolution torus coast distance, a coastal plain rising to smoothed province base levels, and a shelf, slope, and abyssal plain.
    Elevations are relative to the provisional coast at 0 m; feature synthesis comes next.
    See [cmd/terrain/README.md](cmd/terrain/README.md).
 
 Later stages (terrain features, the terrain-based landmask, drainage, climate, biomes, resources) are not implemented yet.
 
-The planned generation order is `continents → structure → terrain → landmask → drainage → climate → ecosystems`, with resources depending on geology. The current affinity-based landmask command remains useful for inspection; final coastline acceptance will require a terrain-input mode. Do not assume its present continental-input artifact freezes coastlines before geological structure in the default pipeline.
+The planned generation order is `continents → structure → trench → terrain → landmask → drainage → climate → ecosystems`, with resources depending on geology. The current affinity-based landmask command remains useful for inspection; final coastline acceptance will require a terrain-input mode. Do not assume its present continental-input artifact freezes coastlines before geological structure in the default pipeline.
 
 ## Layout
 
@@ -63,6 +68,7 @@ The planned generation order is `continents → structure → terrain → landma
 - `internal/continent`: storing and loading the continental artifact.
 - `internal/landmask`: creating, storing, and loading the land/ocean artifact.
 - `internal/structure`: feature records and their validation, toroidal geometry queries, province partitioning, coast interpretation, automatic placement, geology proxies and rock classification, recentering, and the structure artifact.
+- `internal/trench`: subduction polarity, trench placement and clipping, trench records and their validation, and the trench artifact.
 - `internal/terrain`: the coast distance transform, the continental foundation, and the terrain artifact.
 - `internal/artifact`: helpers shared by packages that publish artifact directories.
 - `internal/prng`: reproducible random streams derived from a seed and a domain name.

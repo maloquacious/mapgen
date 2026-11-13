@@ -2,16 +2,17 @@
 
 ## Purpose and place in the pipeline
 
-`terrain` turns an accepted structure checkpoint into ground and seabed elevation: a continental foundation, mountain belts with ridges and passes, plateaus, basins, rifts, island arcs, and the seabed.
+`terrain` turns an accepted trench checkpoint, which carries the structure records and the trench records, into ground and seabed elevation: a continental foundation, mountain belts with ridges and passes, plateaus, basins, rifts, island arcs, and the seabed.
 It runs before final coastline selection.
 The coast it implies can differ from the provisional coast that structure used, and `landmask` freezes ocean membership from this terrain afterwards.
 
 ```text
-continents → structure → terrain → landmask → drainage → climate → ecosystems
-                 └─────────────────────────────────────────────→ resources
+continents → structure → trench → terrain → landmask → drainage → climate → ecosystems
+                 └──────────────────────────────────────────────────────→ resources
 ```
 
 * `structure` supplies the provisional mask, provinces, authoritative feature records with elevation and relief targets, and geology.
+* `trench` supplies the polarity of every active margin and island arc, and trench records; see [Trench Generation Design.md](<Trench Generation Design.md>).
 * `terrain` generates mean elevation, representative high elevation, and relief at full resolution, with sparse ridge and pass records.
 * `landmask`, in a new terrain-input mode, selects sea level and the connected ocean from that elevation.
 
@@ -36,6 +37,7 @@ The coastline is selected by `landmask` against this terrain, and drainage may c
 
 Changing the terrain seed changes ridge chains, branches, pass positions, target draws within each feature's ranges, and residual detail.
 It must not move a feature's backbone or outline, widen or narrow its envelope, change its elevated flank, or remove an associated plateau or basin; those belong to the accepted structure.
+Nor may it move, add, or remove a trench; those belong to the accepted trench checkpoint.
 
 ## Command interface
 
@@ -43,16 +45,16 @@ Proposed usage:
 
 ```sh
 go run ./cmd/terrain \
-  --in tmp/structure-42 \
+  --in tmp/trench-42 \
   --seed 42 \
   --out tmp/terrain-42
 ```
 
 | Flag | Meaning |
 | --- | --- |
-| `--in` | Accepted structure artifact; default `tmp/structure` |
+| `--in` | Accepted trench artifact; default `tmp/trench` |
 | `--out` | New output directory; default `tmp/terrain`. An existing one is never replaced |
-| `--seed` | Terrain seed; if omitted, the structure seed. The manifest records the seed and whether it was explicit |
+| `--seed` | Terrain seed; if omitted, the trench seed. The manifest records the seed and whether it was explicit |
 | `--residual` | Add residual detail noise; default true. `--residual=false` publishes the structured surface alone, which must remain recognizable |
 | `--recenter` | Translate the complete result; off by default |
 | `--png` | Generate previews; default true |
@@ -61,11 +63,11 @@ go run ./cmd/terrain \
 | `--version` | Print the generator version |
 
 `--config` is deferred, as it is for structure.
-There is no fixture flag: structure's `--features` already supplies fixed features, and terrain reads them from the structure artifact.
+There is no fixture flag: structure's `--features` already supplies fixed features, and terrain reads them, with the trenches, from the trench artifact.
 
 ## Inputs and physical domain
 
-Load and verify the structure artifact with `structure.Load`, without the original continental directory.
+Load and verify the trench artifact with `trench.LoadRecords`, which verifies the structure records it retains, without the structure or continental directories.
 Terrain requires the provisional mask, provinces, and features.
 It does not require rock classification, and it does not read the geology proxies; geology describes rock and stress, and terrain must not derive elevation from it.
 Terrain does read `provinces.json` types, which the foundation uses to choose lowland and upland base levels.
@@ -209,8 +211,9 @@ As maturity rises, chain amplitude falls toward the bottom of the relief range, 
   The axis floor may fall under the datum, so a rift can become an inlet, a lake, or an arm of the sea.
 - **Island arc:** a submarine ridge to its regional target, plus separate volcanic peaks along the backbone, each a compact cone 10–40 km across, 50–150 km apart, with heights from the relief draw.
   Peaks that rise above sea level after `landmask` become the arc's islands.
-- **Trench:** an active margin or island arc facing ocean gets a trench on its ocean side: a narrow depression to 6,000–8,000 m below the datum, beyond the edge of the feature's envelope, following the backbone.
-  The trench is terrain's own addition, with starting values of its own; structure records no trench feature.
+- **Trench:** each trench record is a narrow depression along its backbone, to its floor target below the datum, deepest on the axis and easing to the surrounding seabed at the edge of its width.
+  The `trench` stage decides where trenches lie and on which side of their parents; terrain only gives them depth.
+  A trench never lowers provisional land: trench placement looks past islands smaller than structure's province minimum, and those islands stay.
 - **Fault:** a narrow linear form within its width: a trough up to 200 m deep for `strike_slip`, a step of up to 300 m across the line for `normal`, and a low ridge up to 300 m high for `thrust`.
   A fault never makes a mountain range by itself.
 
@@ -255,7 +258,8 @@ All streams use `prng.New(seed, domain, sequence)` with the terrain seed:
 | --- | --- | --- |
 | `terrain-v1/foundation/provinces` | Province ID | Interior base level of one province |
 | `terrain-v1/foundation/fields` | Field number | Smooth fields: interior variation (0), shelf depth (1), shelf width (2), abyssal depth (3) |
-| `terrain-v1/feature` | Feature `key` | Target control samples, chains, branches, gaps, corridors, peaks, and trench depth for one feature |
+| `terrain-v1/feature` | Feature `key` | Target control samples, chains, branches, gaps, corridors, and peaks for one feature |
+| `terrain-v1/trench` | Trench `key` | The floor depth and along-axis variation of one trench |
 | `terrain-v1/residual` | Octave number | One octave of residual noise |
 
 Using the feature `key`, not the feature ID or its position in the list, keeps each feature's terrain independent of every other feature: adding, removing, or reordering a feature in a fixture leaves the others unchanged.
@@ -264,21 +268,21 @@ The order of draws within each stream is part of `terrain-v1`; changing it chang
 
 ## Saved artifact
 
-The format is `mapgen-terrain-v1`.
+The format is `mapgen-terrain-v2`; v2 reads a trench checkpoint instead of a structure checkpoint.
 
 | Content | Purpose |
 | --- | --- |
-| `manifest.json` | Format and generator versions, input structure manifest and its checksum, seed, grid, resolved parameters (`foundation-v1`, `belts-v1`, `subcell-v1`, `residual-v1`), residual on or off, recentering, and checksums for every saved file |
+| `manifest.json` | Format and generator versions, input trench manifest (which records the structure manifest) and its checksum, seed, grid, resolved parameters (`foundation-v1`, `belts-v1`, `subcell-v1`, `residual-v1`), residual on or off, recentering, and checksums for every saved file |
 | `elevation.f32` | `ElevationM`: mean solid surface elevation, m, relative to the provisional datum |
 | `high.f32` | `HighM`: representative high, m, at least `ElevationM` |
 | `relief.f32` | `ReliefM`: representative high minus valley, m, at least 0 |
 | `ridges.json` | Ridge chains, branches, corridors, and saddles in the structure coordinate convention, keyed by parent feature |
-| Retained structure records | `features.json`, `provinces.json`, `provinces.u32`, `provisional-land.u8`, `rock.u8`, `pressure.f32`, `shear.f32`, `igneous.f32`, `rock-noise.f32`, unchanged |
+| Retained records | The structure records `features.json`, `provinces.json`, `provinces.u32`, `provisional-land.u8`, `rock.u8`, `pressure.f32`, `shear.f32`, `igneous.f32`, `rock-noise.f32`, and the trench records `trenches.json`, unchanged |
 | `diagnostics.json` | Elevation and relief statistics on provisional land and water, the datum shift and changed cells at the provisional fraction, target conformance per feature, and noise bounds measured |
 | Previews | See "Previews and acceptance" |
 
 Rasters are float32 little-endian, full resolution, row-major, row 0 at the north, as everywhere else.
-The structure records are retained so the artifact is self-contained: `landmask` and the stages after it never need the structure directory, and resources reach geology through each checkpoint.
+The structure and trench records are retained so the artifact is self-contained: `landmask` and the stages after it never need the structure or trench directories, and resources reach geology through each checkpoint.
 The continental affinity fields are not retained: they are layout values that elevation supersedes, and their checksums remain in the recorded input manifest chain.
 
 Input paths are not recorded.
@@ -352,24 +356,32 @@ The terrain-mode artifact carries the clamped elevation, high, and relief fields
    Envelope weights and target interpretation for every feature type, the combination rule, and `preview-structure.png`, with residual off.
    This is the handoff the structure design asks to prove on fixed features.
 3. **Belt components.**
-   Ridge chains, branches, longitudinal basins, corridors and saddles, volcanic peaks, trenches, and `ridges.json`.
+   Ridge chains, branches, longitudinal basins, corridors and saddles, volcanic peaks, the trench depressions from the trench records, and `ridges.json`.
 4. **Subcell rasterization.**
    The 4 by 4 sampling, high and relief, the subcell relief model, the spatial index, and parallel tiles with the worker-count test.
 5. **Residual detail** with its bounds tests.
 6. **Recentering.**
 7. **Landmask terrain-input mode.**
 
-### Prerequisite in structure
+### Prerequisites in structure and trench
 
 Structure step 3 is finished: automatic placement produces every feature kind, including interrupted old belts, intermontane basins, and interior basins.
 `internal/structure/testdata/fixture.json` holds one of every kind, so terrain step 2 can test the handoff on it.
 An interrupted belt is a chain of `old_orogen` segments, each after the first naming the first as its parent; terrain treats each segment as an ordinary belt.
+
+The `trench` stage is implemented; terrain reads its checkpoint.
+The structure fixture's world is too small for a trench, so the handoff test of trench depressions needs a larger fixture or an automatically placed structure.
+
+## Decisions
+
+These choices were open and are settled:
+
+- Trenches are records of their own `trench` stage, between structure and terrain, rather than a terrain addition or a structure feature.
+- Landform classes (plain, hills, mountain, plateau, basin) are deferred until after drainage, since they depend on the final coast and valleys.
 
 ## Open decisions
 
 These choices are made above, but are worth confirming before implementation:
 
 - the provisional datum, with the provisional coast at 0 m, rather than terrain choosing sea level itself;
-- dropping the continental affinity fields from the terrain artifact;
-- trenches as a terrain addition rather than a structure feature;
-- landform classes (plain, hills, mountain, plateau, basin) deferred until after drainage, since they depend on the final coast and valleys.
+- dropping the continental affinity fields from the terrain artifact.

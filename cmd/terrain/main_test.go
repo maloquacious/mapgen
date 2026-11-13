@@ -7,12 +7,14 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/maloquacious/mapgen/internal/continent"
 	"github.com/maloquacious/mapgen/internal/fracture"
 	"github.com/maloquacious/mapgen/internal/structure"
 	"github.com/maloquacious/mapgen/internal/terrain"
+	"github.com/maloquacious/mapgen/internal/trench"
 )
 
 func TestCommand(t *testing.T) {
@@ -35,8 +37,16 @@ func TestCommand(t *testing.T) {
 	if err := structure.Write(t.Context(), sdir, sr, 0); err != nil {
 		t.Fatal(err)
 	}
+	tr, err := trench.Generate(t.Context(), trench.Options{In: sdir, Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tdir := filepath.Join(t.TempDir(), "trench")
+	if err := trench.Write(t.Context(), tdir, tr, 0); err != nil {
+		t.Fatal(err)
+	}
 	out := filepath.Join(t.TempDir(), "terrain")
-	args := []string{"--in", sdir, "--out", out, "--seed", "9", "--png-scale", "2"}
+	args := []string{"--in", tdir, "--out", out, "--seed", "9", "--png-scale", "2"}
 	if err := run(t.Context(), args); err != nil {
 		t.Fatal(err)
 	}
@@ -63,10 +73,15 @@ func TestCommand(t *testing.T) {
 		t.Error("replaced an existing output directory")
 	}
 	noPreview := filepath.Join(t.TempDir(), "nopreview")
-	if err := run(t.Context(), []string{"--in", sdir, "--out", noPreview, "--png=false"}); err != nil {
+	if err := run(t.Context(), []string{"--in", tdir, "--out", noPreview, "--png=false"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(noPreview, terrain.PreviewFile)); !os.IsNotExist(err) {
 		t.Error("wrote the preview with --png=false")
+	}
+	// A structure artifact is not a trench artifact.
+	err = run(t.Context(), []string{"--in", sdir, "--out", filepath.Join(t.TempDir(), "wrong")})
+	if err == nil || !strings.Contains(err.Error(), trench.Format) {
+		t.Errorf("structure input: %v", err)
 	}
 }

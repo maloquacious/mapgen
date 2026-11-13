@@ -8,12 +8,13 @@ It runs before final coastline selection, so geological features can influence w
 The generation order is:
 
 ```text
-continents → structure → terrain → landmask → drainage → climate → ecosystems
-                 └─────────────────────────────────────────────→ resources
+continents → structure → trench → terrain → landmask → drainage → climate → ecosystems
+                 └──────────────────────────────────────────────────────→ resources
 ```
 
 * `continents` supplies continental affinity.
 * `structure` interprets that field using a provisional coast and places geological regions and events.
+* `trench` decides which side of each active margin and island arc subducts, and places ocean trenches there; see [Trench Generation Design.md](<Trench Generation Design.md>).
 * `terrain` generates elevations and relief.
 * `landmask` selects and freezes the final ocean and land distribution from that terrain.
 

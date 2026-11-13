@@ -13,11 +13,13 @@ import (
 	"github.com/maloquacious/mapgen/internal/fracture"
 	"github.com/maloquacious/mapgen/internal/structure"
 	"github.com/maloquacious/mapgen/internal/terrain"
+	"github.com/maloquacious/mapgen/internal/trench"
 )
 
-// structureDir writes a 96 x 48 continental artifact of 6 km cells and a
-// structure artifact from it with the structure fixture.
-func structureDir(t *testing.T) string {
+// inputDir writes a 96 x 48 continental artifact of 6 km cells, a structure
+// artifact from it with the structure fixture, and a trench artifact from
+// that, and returns the trench artifact.
+func inputDir(t *testing.T) string {
 	t.Helper()
 	p, err := fracture.DefaultParams(42, 96, 48, 6)
 	if err != nil {
@@ -39,8 +41,16 @@ func structureDir(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := filepath.Join(t.TempDir(), "structure")
-	if err := structure.Write(t.Context(), out, sr, 0); err != nil {
+	sdir := filepath.Join(t.TempDir(), "structure")
+	if err := structure.Write(t.Context(), sdir, sr, 0); err != nil {
+		t.Fatal(err)
+	}
+	tr, err := trench.Generate(t.Context(), trench.Options{In: sdir, Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "trench")
+	if err := trench.Write(t.Context(), out, tr, 0); err != nil {
 		t.Fatal(err)
 	}
 	return out
@@ -95,7 +105,7 @@ func sameFiles(t *testing.T, a, b map[string]string) {
 }
 
 func TestFoundationKeepsProvisionalCoast(t *testing.T) {
-	in := structureDir(t)
+	in := inputDir(t)
 	r := generate(t, in, nil)
 	land := r.Structure.Land
 	for i, e := range r.Elevation {
@@ -123,7 +133,7 @@ func TestFoundationKeepsProvisionalCoast(t *testing.T) {
 }
 
 func TestArtifactRoundTrip(t *testing.T) {
-	in := structureDir(t)
+	in := inputDir(t)
 	r := generate(t, in, nil)
 	out := write(t, r)
 	want := files(t, out)
@@ -136,7 +146,7 @@ func TestArtifactRoundTrip(t *testing.T) {
 	}
 	sameFiles(t, want, files(t, write(t, loaded)))
 	// Retained records are the input's bytes; the continental fields and
-	// structure diagnostics are not kept.
+	// earlier diagnostics are not kept.
 	input := files(t, in)
 	for _, f := range r.Manifest.Retained {
 		if want[f.File] != input[f.File] {
@@ -148,7 +158,7 @@ func TestArtifactRoundTrip(t *testing.T) {
 			t.Errorf("retained %s", name)
 		}
 	}
-	for _, name := range []string{terrain.ManifestFile, terrain.DiagnosticsFile, terrain.PreviewFile, "elevation.f32", "high.f32", "relief.f32", structure.FeaturesFile, structure.RockFile} {
+	for _, name := range []string{terrain.ManifestFile, terrain.DiagnosticsFile, terrain.PreviewFile, "elevation.f32", "high.f32", "relief.f32", structure.FeaturesFile, structure.RockFile, trench.TrenchesFile} {
 		if _, ok := want[name]; !ok {
 			t.Errorf("missing %s", name)
 		}
@@ -171,7 +181,7 @@ func TestArtifactRoundTrip(t *testing.T) {
 }
 
 func TestSeed(t *testing.T) {
-	in := structureDir(t)
+	in := inputDir(t)
 	a, b := generate(t, in, new(uint64(1))), generate(t, in, new(uint64(2)))
 	if b.Manifest.SeedSource != terrain.SeedExplicit {
 		t.Errorf("seed source %s", b.Manifest.SeedSource)
