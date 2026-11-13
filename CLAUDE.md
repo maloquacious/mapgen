@@ -27,6 +27,7 @@ These documents in the repository root define the design. Read the relevant one 
 - [Cylindrical World Map Generator Specification for Go Coding Agents.md](<Cylindrical World Map Generator Specification for Go Coding Agents.md>): the overall generator; coordinates, wrapping rules, state model, determinism, and the MUST requirements.
 - [Fracture Continent Generator Implementation Specification.md](<Fracture Continent Generator Implementation Specification.md>): the continent source, adapted from mdhender/hamwold at a pinned commit.
 - [Structure Generation Design.md](<Structure Generation Design.md>): geological structure before terrain and final coastline selection, feature records, checkpoints, previews, and integration changes.
+- [Terrain Generation Design.md](<Terrain Generation Design.md>): elevation from accepted structure; the continental foundation, feature synthesis, subcell rasterization, residual detail, the terrain artifact, and the landmask terrain-input mode.
 
 `docs/` holds reference material: research papers (`docs/research/`, PDFs are git-ignored) and the USGS land use classification.
 
