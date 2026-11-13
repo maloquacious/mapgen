@@ -38,20 +38,60 @@ type Recentering struct {
 // unrecentered one moved by whole cells: nothing is regenerated, and IDs,
 // keys, and component numbers are kept.
 func recenter(ctx context.Context, r *Result) error {
-	g := r.Manifest.Grid
 	c, err := fracture.FindCentering(ctx, r.Fields[continent.FieldAffinity], r.Manifest.ProvisionalLandFraction)
 	if err != nil {
 		return fmt.Errorf("recenter: %w", err)
 	}
-	dx, dy := float64(c.X)*g.CellWidthKM, float64(c.Y)*g.CellHeightKM
-	r.Manifest.Recentering = Recentering{
-		Applied: true, ShiftX: c.X, ShiftY: c.Y, ShiftXKM: dx, ShiftYKM: dy,
+	r.Manifest.Recentering = record(r.Manifest.Grid, c, c.X, c.Y)
+	return translate(ctx, r, c.X, c.Y)
+}
+
+// Recenter translates a result read with LoadRecords so that its largest
+// provisional land component is centered, as --recenter does, and returns
+// this translation's record. The manifest's Recentering accumulates it, so
+// it stays relative to the continental input. Later stages that retain the
+// records use it to recenter without the continental fields.
+//
+// The centering depends only on the provisional mask, which is the mask
+// --recenter centers, so an unrecentered result moves exactly as structure
+// would have moved it, and a recentered one does not move.
+func (r *Result) Recenter(ctx context.Context) (Recentering, error) {
+	g := r.Manifest.Grid
+	v := make([]float32, len(r.Land))
+	for i, x := range r.Land {
+		v[i] = float32(x)
+	}
+	f := &fracture.FractureField{Columns: g.Columns, Rows: g.Rows, WidthKM: g.WidthKM, HeightKM: g.HeightKM, Values: v}
+	c, err := fracture.FindCentering(ctx, f, r.Manifest.ProvisionalLandFraction)
+	if err != nil {
+		return Recentering{}, fmt.Errorf("recenter: %w", err)
+	}
+	step := record(g, c, c.X, c.Y)
+	x, y := c.X, c.Y
+	if prev := r.Manifest.Recentering; prev.Applied {
+		x, y = (prev.ShiftX+c.X)%g.Columns, (prev.ShiftY+c.Y)%g.Rows
+	}
+	r.Manifest.Recentering = record(g, c, x, y)
+	return step, translate(ctx, r, c.X, c.Y)
+}
+
+// record describes a translation by (x, y) cells, with c's diagnostics.
+func record(g continent.Grid, c fracture.Centering, x, y int) Recentering {
+	return Recentering{
+		Applied: true, ShiftX: x, ShiftY: y, ShiftXKM: float64(x) * g.CellWidthKM, ShiftYKM: float64(y) * g.CellHeightKM,
 		XAmbiguous: c.XAmbiguous, YAmbiguous: c.YAmbiguous,
 		ComponentCells: c.ComponentCells, Components: c.Components, Transform: RecenterTransform,
 	}
-	if c.X == 0 && c.Y == 0 {
+}
+
+// translate moves every part of r by (cx, cy) whole cells.
+func translate(ctx context.Context, r *Result, cx, cy int) error {
+	if cx == 0 && cy == 0 {
 		return nil
 	}
+	g := r.Manifest.Grid
+	c := struct{ X, Y int }{cx, cy}
+	dx, dy := float64(c.X)*g.CellWidthKM, float64(c.Y)*g.CellHeightKM
 	cols, rows := g.Columns, g.Rows
 	r.Land = slide(r.Land, cols, rows, c.X, c.Y)
 	r.Owner = slide(r.Owner, cols, rows, c.X, c.Y)

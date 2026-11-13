@@ -19,12 +19,17 @@ import (
 // inputDir writes a 96 x 48 continental artifact of 6 km cells, a structure
 // artifact from it with the structure fixture, and a trench artifact from
 // that, and returns the trench artifact.
-func inputDir(t *testing.T) string {
+func inputDir(t *testing.T) string { return inputDirOpts(t, false) }
+
+// inputDirOpts is inputDir with the continents left off center and the
+// trench stage recentering them, when recenter is set.
+func inputDirOpts(t *testing.T, recenter bool) string {
 	t.Helper()
 	p, err := fracture.DefaultParams(42, 96, 48, 6)
 	if err != nil {
 		t.Fatal(err)
 	}
+	p.Recenter = !recenter
 	cr, err := fracture.Generate(t.Context(), p)
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +50,7 @@ func inputDir(t *testing.T) string {
 	if err := structure.Write(t.Context(), sdir, sr, 0); err != nil {
 		t.Fatal(err)
 	}
-	tr, err := trench.Generate(t.Context(), trench.Options{In: sdir, Version: "test"})
+	tr, err := trench.Generate(t.Context(), trench.Options{In: sdir, Version: "test", Recenter: recenter})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,5 +202,31 @@ func TestSeed(t *testing.T) {
 	}
 	if differ == 0 {
 		t.Error("the seed changes nothing")
+	}
+}
+
+// Terrain reads a trench artifact whose structure records were recentered
+// by the trench stage.
+func TestRecenteredTrenchInput(t *testing.T) {
+	in := inputDirOpts(t, true)
+	tr, err := trench.Load(t.Context(), in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := tr.Manifest.Recentering; c.ShiftX == 0 && c.ShiftY == 0 || tr.Manifest.RecenteredRecords == nil {
+		t.Fatalf("the trench input was not moved: %+v", c)
+	}
+	r := generate(t, in, nil)
+	out := write(t, r)
+	loaded, err := terrain.Load(t.Context(), out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sameFiles(t, files(t, out), files(t, write(t, loaded)))
+	input := files(t, in)
+	for _, f := range r.Manifest.Retained {
+		if files(t, out)[f.File] != input[f.File] {
+			t.Errorf("%s was not retained unchanged", f.File)
+		}
 	}
 }

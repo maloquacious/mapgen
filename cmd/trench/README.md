@@ -13,7 +13,6 @@ The design is in [Trench Generation Design.md](<../../Trench Generation Design.m
 
 ## Not implemented yet
 
-- `--recenter`; recenter at the structure stage instead.
 - A trench fixture flag and `--config`.
 
 ## Flags
@@ -23,6 +22,7 @@ The design is in [Trench Generation Design.md](<../../Trench Generation Design.m
 | `--in` | Structure artifact directory; default `tmp/structure` |
 | `--out` | New output directory; default `tmp/trench`. An existing one is never replaced |
 | `--seed` | Trench seed, unsigned 64-bit. If omitted, the structure input's seed is used; the manifest records the seed and which of the two it was |
+| `--recenter` | Translate the complete result, structure records included, to center the largest provisional landmass; default false |
 | `--png` | Write `preview.png`; default true |
 | `--png-scale` | Sampling interval in cells for `preview.png`; default 1 |
 | `--version` | Print the generator version |
@@ -42,13 +42,20 @@ Each trench is 60â€“120 km wide, with a floor range 1,000 m deep centered 6,500â
 
 The seed changes widths, distances, and depths; polarity changes with it only for an arc with exactly equal open water on both sides.
 
+## Recentering
+
+`--recenter` places trenches first, then moves everything by whole cells to center the largest provisional landmass.
+It centers the same mask structure's `--recenter` does, so on an unrecentered structure it gives structure's own shift, and on a recentered one it moves nothing.
+The manifest's `recentering` record gives this stage's shift.
+When the shift is not zero, the structure records are rewritten and `recentered_records` describes them: the input structure manifest with new record checksums and the accumulated recentering.
+
 ## Output
 
 | File | Content |
 | --- | --- |
-| `manifest.json` | Format `mapgen-trench-v1`, versions, the input structure manifest and its checksum, seed, grid, `trench_parameters`, `land_mask`, retained records, and checksums |
+| `manifest.json` | Format `mapgen-trench-v2`, versions, the input structure manifest and its checksum, seed, grid, `trench_parameters`, `land_mask`, `recentering`, `recentered_records` when the records moved, retained records, and checksums |
 | `trenches.json` | Format `mapgen-trenches-v1`: subduction records and trench records, geometry in km like structure features |
-| `features.json`, `provinces.json`, `provinces.u32`, `provisional-land.u8`, `rock.u8`, `pressure.f32`, `shear.f32`, `igneous.f32`, `rock-noise.f32` | The structure records, byte for byte |
+| `features.json`, `provinces.json`, `provinces.u32`, `provisional-land.u8`, `rock.u8`, `pressure.f32`, `shear.f32`, `igneous.f32`, `rock-noise.f32` | The structure records, byte for byte unless `--recenter` moved them |
 | `diagnostics.json` | Subduction zones by basis, trench count and total length, omissions |
 | `preview.png` | Simplified land and water, active margin and arc envelopes (orange), and trench footprints (dark blue) |
 

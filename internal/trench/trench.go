@@ -7,7 +7,9 @@
 // "Trench Generation Design.md".
 //
 // The domain is a torus, as in every stage before climate. The artifact
-// retains the structure records, so terrain needs no other directory.
+// retains the structure records, so terrain needs no other directory. An
+// optional final step translates the complete result, structure records
+// included, to center the largest provisional landmass; see recenter.go.
 package trench
 
 import (
@@ -30,7 +32,7 @@ import (
 )
 
 const (
-	Format          = "mapgen-trench-v1"
+	Format          = "mapgen-trench-v2"
 	Topology        = "torus: x and y wrap; the map may be recentered until climate"
 	SeedExplicit    = "explicit"
 	SeedFromInput   = "structure input"
@@ -68,10 +70,27 @@ type Manifest struct {
 	Trenches        File   `json:"trenches"`
 	SubductionCount int    `json:"subduction_count"`
 	TrenchCount     int    `json:"trench_count"`
-	// Retained lists the structure records copied unchanged, as the input
-	// manifest describes them.
+	// Recentering records this stage's translation, relative to the
+	// structure input. It is always present.
+	Recentering structure.Recentering `json:"recentering"`
+	// RecenteredRecords describes the retained structure records when this
+	// stage translated them: the input manifest with the record files and
+	// the accumulated recentering replaced. It is absent when the records
+	// are the input's, byte for byte.
+	RecenteredRecords *structure.Manifest `json:"recentered_records,omitzero"`
+	// Retained lists the retained structure records, as RecordsManifest
+	// describes them.
 	Retained    []File `json:"retained"`
 	Diagnostics File   `json:"diagnostics"`
+}
+
+// RecordsManifest returns the structure manifest that describes the
+// retained structure records: the input's, or the recentered one.
+func (m *Manifest) RecordsManifest() structure.Manifest {
+	if m.RecenteredRecords != nil {
+		return *m.RecenteredRecords
+	}
+	return m.Input.Manifest
 }
 
 // Records lists the files a later stage retains from a trench artifact, in
@@ -99,6 +118,9 @@ type Options struct {
 	In      string  // structure artifact directory
 	Seed    *uint64 // trench seed; nil uses the structure seed
 	Version string  // generator version
+	// Recenter translates the complete result, structure records included,
+	// to center the largest provisional landmass.
+	Recenter bool
 }
 
 // CheckFormat reports whether a manifest's bytes name this artifact format,
@@ -173,6 +195,11 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 		return nil, fmt.Errorf("trench placement: %w", err)
 	}
 	r.Manifest.SubductionCount, r.Manifest.TrenchCount = len(r.Trenches.Subduction), len(r.Trenches.Trenches)
+	if o.Recenter {
+		if err := recenter(ctx, r); err != nil {
+			return nil, err
+		}
+	}
 	return r, ctx.Err()
 }
 
@@ -218,13 +245,22 @@ func Write(ctx context.Context, dir string, r *Result, previewScale int) error {
 	}
 	defer os.RemoveAll(tmp)
 	m := r.Manifest
-	for _, f := range m.Retained {
-		b, ok := r.records[f.File]
-		if !ok || checksum(b) != f.SHA256 {
-			return fmt.Errorf("retained record %s is missing or changed", f.File)
-		}
-		if err := os.WriteFile(filepath.Join(tmp, f.File), b, 0o644); err != nil {
+	if m.RecenteredRecords != nil {
+		// Translated records are written afresh and described anew.
+		rm, err := structure.WriteRecords(tmp, r.Structure)
+		if err != nil {
 			return err
+		}
+		m.RecenteredRecords, m.Retained = &rm, rm.Records()
+	} else {
+		for _, f := range m.Retained {
+			b, ok := r.records[f.File]
+			if !ok || checksum(b) != f.SHA256 {
+				return fmt.Errorf("retained record %s is missing or changed", f.File)
+			}
+			if err := os.WriteFile(filepath.Join(tmp, f.File), b, 0o644); err != nil {
+				return err
+			}
 		}
 	}
 	trenches, err := r.Trenches.Marshal()
@@ -321,7 +357,10 @@ func LoadRecords(ctx context.Context, dir string, m Manifest) (*Result, error) {
 	if m.Parameters.Algorithm != Algorithm {
 		return nil, fmt.Errorf("unsupported trench algorithm %q", m.Parameters.Algorithm)
 	}
-	sm := m.Input.Manifest
+	if err := m.checkRecentering(); err != nil {
+		return nil, err
+	}
+	sm := m.RecordsManifest()
 	if !slices.Equal(m.Retained, sm.Records()) {
 		return nil, fmt.Errorf("retained records do not match the input manifest")
 	}

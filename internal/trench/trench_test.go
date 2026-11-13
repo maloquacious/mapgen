@@ -4,6 +4,7 @@
 package trench_test
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,15 +16,16 @@ import (
 	"github.com/maloquacious/mapgen/internal/trench"
 )
 
-// structureDir writes a 480 x 240 continental artifact of 12 km cells and an
-// automatically placed structure artifact from it. Seed 4 places an active
-// margin; a world this small has no room for island arcs.
-func structureDir(t *testing.T) string {
+// continentsDir writes a 480 x 240 continental artifact of 12 km cells,
+// not recentered, so the largest landmass lies off center. Seed 4 gives an
+// active margin; a world this small has no room for island arcs.
+func continentsDir(t *testing.T) string {
 	t.Helper()
 	p, err := fracture.DefaultParams(4, 480, 240, 12)
 	if err != nil {
 		t.Fatal(err)
 	}
+	p.Recenter = false
 	cr, err := fracture.Generate(t.Context(), p)
 	if err != nil {
 		t.Fatal(err)
@@ -32,7 +34,13 @@ func structureDir(t *testing.T) string {
 	if err := continent.Write(in, continent.NewManifest("test", cr), cr); err != nil {
 		t.Fatal(err)
 	}
-	sr, err := structure.Generate(t.Context(), structure.Options{In: in, Fraction: 0.325, Version: "test"})
+	return in
+}
+
+// structureFrom writes an automatically placed structure artifact.
+func structureFrom(t *testing.T, cdir string, recenter bool) string {
+	t.Helper()
+	sr, err := structure.Generate(t.Context(), structure.Options{In: cdir, Fraction: 0.325, Version: "test", Recenter: recenter})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,9 +51,16 @@ func structureDir(t *testing.T) string {
 	return out
 }
 
+func structureDir(t *testing.T) string { return structureFrom(t, continentsDir(t), false) }
+
 func generate(t *testing.T, in string, seed *uint64) *trench.Result {
 	t.Helper()
-	r, err := trench.Generate(t.Context(), trench.Options{In: in, Seed: seed, Version: "test"})
+	return generateOpts(t, trench.Options{In: in, Seed: seed, Version: "test"})
+}
+
+func generateOpts(t *testing.T, o trench.Options) *trench.Result {
+	t.Helper()
+	r, err := trench.Generate(t.Context(), o)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,6 +225,74 @@ func TestValidateAgainstFeatures(t *testing.T) {
 		change(tf)
 		if err := tf.Validate(ff); err == nil {
 			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+// Recentering an unrecentered structure moves its records exactly as
+// structure's --recenter does, and moves the trenches with them.
+func TestRecenter(t *testing.T) {
+	cdir := continentsDir(t)
+	plain, moved := structureFrom(t, cdir, false), structureFrom(t, cdir, true)
+	base := generate(t, plain, nil)
+	r := generateOpts(t, trench.Options{In: plain, Version: "test", Recenter: true})
+	c := r.Manifest.Recentering
+	sm, err := structure.Load(t.Context(), moved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := sm.Manifest.Recentering
+	if !c.Applied || c.ShiftX != want.ShiftX || c.ShiftY != want.ShiftY || (c.ShiftX == 0 && c.ShiftY == 0) {
+		t.Fatalf("shift (%d, %d), structure's (%d, %d)", c.ShiftX, c.ShiftY, want.ShiftX, want.ShiftY)
+	}
+	out := write(t, r)
+	got, ref := files(t, out), files(t, moved)
+	loaded, err := trench.Load(t.Context(), out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Manifest.RecenteredRecords == nil || loaded.Manifest.RecenteredRecords.Recentering != want {
+		t.Errorf("recentered records manifest %+v", loaded.Manifest.RecenteredRecords)
+	}
+	for _, f := range loaded.Manifest.Retained {
+		if got[f.File] != ref[f.File] {
+			t.Errorf("%s differs from structure's recentered record", f.File)
+		}
+	}
+	sameFiles(t, got, files(t, write(t, loaded)))
+	// The trenches move by the shift, renormalized to the base domain.
+	dom := r.Domain()
+	for i, tr := range r.Trenches.Trenches {
+		a, b := base.Trenches.Trenches[i].Backbone[0], tr.Backbone[0]
+		dx := math.Mod(a.X+c.ShiftXKM-b.X+dom.WidthKM*2, dom.WidthKM)
+		dy := math.Mod(a.Y+c.ShiftYKM-b.Y+dom.HeightKM*2, dom.HeightKM)
+		if min(dx, dom.WidthKM-dx) > 1e-6 || min(dy, dom.HeightKM-dy) > 1e-6 {
+			t.Errorf("trench %d starts at (%g, %g), from (%g, %g)", tr.ID, b.X, b.Y, a.X, a.Y)
+		}
+	}
+	// Inconsistent records are rejected.
+	m := loaded.Manifest
+	m.Recentering.ShiftX = (m.Recentering.ShiftX + 1) % m.Grid.Columns
+	m.Recentering.ShiftXKM = float64(m.Recentering.ShiftX) * m.Grid.CellWidthKM
+	if _, err := trench.LoadRecords(t.Context(), out, m); err == nil {
+		t.Error("accepted a recentering that does not match the records")
+	}
+	m = loaded.Manifest
+	m.RecenteredRecords = nil
+	if _, err := trench.LoadRecords(t.Context(), out, m); err == nil {
+		t.Error("accepted moved records without their manifest")
+	}
+
+	// A structure already recentered does not move, and its records are
+	// retained byte for byte.
+	again := generateOpts(t, trench.Options{In: moved, Version: "test", Recenter: true})
+	if c := again.Manifest.Recentering; !c.Applied || c.ShiftX != 0 || c.ShiftY != 0 || again.Manifest.RecenteredRecords != nil {
+		t.Errorf("recentering a recentered structure: %+v", c)
+	}
+	kept := files(t, write(t, again))
+	for _, f := range again.Manifest.Retained {
+		if kept[f.File] != ref[f.File] {
+			t.Errorf("%s was not retained unchanged", f.File)
 		}
 	}
 }

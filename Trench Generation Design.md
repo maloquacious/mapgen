@@ -39,11 +39,12 @@ go run ./cmd/trench --in tmp/structure --out tmp/trench
 | `--in` | Accepted structure artifact; default `tmp/structure` |
 | `--out` | New output directory; default `tmp/trench`. An existing one is never replaced |
 | `--seed` | Trench seed; if omitted, the structure seed. The manifest records the seed and whether it was explicit |
+| `--recenter` | Translate the complete result, structure records included, to center the largest provisional landmass; off by default |
 | `--png` | Write `preview.png`; default true |
 | `--png-scale` | Preview sampling interval in cells; default 1 |
 | `--version` | Print the generator version |
 
-Deferred: `--recenter` (recenter at structure instead), a trench fixture flag, and `--config`.
+Deferred: a trench fixture flag and `--config`.
 
 ## Inputs
 
@@ -127,13 +128,29 @@ Recorded as `trench_parameters`; calibration values, not contracts.
 | `depth_spread_m` | 500 | Half the floor range |
 | `min_length_km` | 300 | Shortest trench kept |
 
+## Recentering
+
+The stage is toroidal, so `--recenter` translates the complete result by whole cells, as structure's `--recenter` does.
+Trenches are placed in the input's frame first; nothing is regenerated, and IDs and keys are kept.
+
+The centered landmass is the largest eight-connected component of the provisional mask, with the convention continents and structure use.
+That mask is the one structure's `--recenter` centers, so recentering here moves an unrecentered structure exactly as structure would have moved it, and leaves a recentered one where it is.
+
+The structure records move by structure's own translation: rasters shift cyclically, and feature outlines, backbones, and province seeds move by the same distance in km and are renormalized to the base domain.
+Trench backbones move the same way.
+
+The manifest's `recentering` record is always present and gives this stage's shift, relative to its structure input.
+When the shift is not zero, the records are no longer the input's bytes, so the manifest adds `recentered_records`: the input structure manifest with the record files and checksums replaced and the recentering accumulated, so it stays relative to the continental input.
+Load accepts it only if it differs from the input manifest in nothing else.
+With a zero shift, `recentered_records` is absent and the records are retained byte for byte.
+
 ## Saved artifact
 
 | File | Content |
 | --- | --- |
-| `manifest.json` | Format `mapgen-trench-v1`, versions, the input structure manifest and its checksum, seed, grid, parameters, the retained records, and checksums |
+| `manifest.json` | Format `mapgen-trench-v2`, versions, the input structure manifest and its checksum, seed, grid, parameters, the recentering record, the recentered records manifest when the records moved, the retained records, and checksums |
 | `trenches.json` | The subduction and trench records |
-| `features.json`, `provinces.json`, `provinces.u32`, `provisional-land.u8`, and the rock files | The structure records, byte for byte |
+| `features.json`, `provinces.json`, `provinces.u32`, `provisional-land.u8`, and the rock files | The structure records, byte for byte unless recentering moved them |
 | `diagnostics.json` | Subduction zones by basis, trench count and length, omissions |
 | `preview.png` | The simplified land and water, active margin and arc envelopes, and trench footprints |
 
@@ -148,3 +165,5 @@ The continental fields and structure diagnostics are not kept; their checksums r
 - A blocked middle splits a trench in two; a short remainder is dropped and recorded.
 - The same seed and input give the same bytes; a different seed keeps every polarity decided by an elevated flank.
 - Load rejects changed records and records that do not match the retained features.
+- Recentering an unrecentered structure gives structure's own shift and records byte for byte equal to structure's recentered ones; recentering a recentered structure moves nothing.
+- Load rejects a recentering record that does not match the recentered records manifest.

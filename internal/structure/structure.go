@@ -308,45 +308,7 @@ func Write(ctx context.Context, dir string, r *Result, previewScale int) error {
 		}
 		m.Fields = append(m.Fields, field)
 	}
-	m.GeologyFields, m.Rock = nil, nil
-	if r.Rock != nil {
-		for _, name := range GeologyFields {
-			f := r.Geology[name]
-			if f == nil || f.Columns != g.Columns || f.Rows != g.Rows {
-				return fmt.Errorf("geology field %q is missing or does not match the grid", name)
-			}
-			field, err := continent.WriteField(tmp, name, geologyDescriptions[name], f)
-			if err != nil {
-				return err
-			}
-			m.GeologyFields = append(m.GeologyFields, field)
-		}
-		if len(r.Rock) != g.Columns*g.Rows {
-			return fmt.Errorf("rock raster does not match the grid")
-		}
-		m.Rock = &File{File: RockFile, Format: "uint8", SHA256: checksum(r.Rock),
-			Description: "row-major; 0=unclassified, 1=sedimentary, 2=igneous, 3=metamorphic"}
-		if err := os.WriteFile(filepath.Join(tmp, RockFile), r.Rock, 0o644); err != nil {
-			return err
-		}
-	}
-	if len(r.Land) != g.Columns*g.Rows || len(r.Owner) != len(r.Land) {
-		return fmt.Errorf("provisional mask or province ownership does not match the grid")
-	}
-	provinces, err := r.Provinces.Marshal()
-	if err != nil {
-		return err
-	}
-	ownership := make([]byte, 0, 4*len(r.Owner))
-	for _, o := range r.Owner {
-		ownership = binary.LittleEndian.AppendUint32(ownership, o)
-	}
-	m.Provinces = File{File: ProvincesFile, Format: ProvincesFormat, SHA256: checksum(provinces),
-		Description: "geological province records"}
-	m.ProvinceOwnership = File{File: OwnershipFile, Format: "uint32 little-endian", SHA256: checksum(ownership),
-		Description: "row-major; the province ID of every cell, never 0"}
-	features, err := r.Features.Marshal()
-	if err != nil {
+	if err := writeRecords(tmp, r, &m); err != nil {
 		return err
 	}
 	diagnostics, err := json.Marshal(r.Diagnostics, json.Deterministic(true), jsontext.WithIndent("  "))
@@ -354,10 +316,6 @@ func Write(ctx context.Context, dir string, r *Result, previewScale int) error {
 		return err
 	}
 	diagnostics = append(diagnostics, '\n')
-	m.ProvisionalLand = File{File: MaskFile, Format: "uint8", SHA256: checksum(r.Land),
-		Description: "row-major; 0=provisional ocean, 1=provisional land; placement data, not the final landmask"}
-	m.Features = File{File: FeaturesFile, Format: FeaturesFormat, SHA256: checksum(features),
-		Description: "authoritative feature records; geometry in km, unwrapped on both axes"}
 	m.Diagnostics = File{File: DiagnosticsFile, Format: "json", SHA256: checksum(diagnostics),
 		Description: "derived coast interpretation, placement counts, omissions, and warnings"}
 	manifest, err := json.Marshal(m, json.Deterministic(true), jsontext.WithIndent("  "))
@@ -367,7 +325,7 @@ func Write(ctx context.Context, dir string, r *Result, previewScale int) error {
 	for _, f := range []struct {
 		name string
 		data []byte
-	}{{MaskFile, r.Land}, {ProvincesFile, provinces}, {OwnershipFile, ownership}, {FeaturesFile, features}, {DiagnosticsFile, diagnostics}, {ManifestFile, append(manifest, '\n')}} {
+	}{{DiagnosticsFile, diagnostics}, {ManifestFile, append(manifest, '\n')}} {
 		if err := os.WriteFile(filepath.Join(tmp, f.name), f.data, 0o644); err != nil {
 			return err
 		}
@@ -399,6 +357,75 @@ func Write(ctx context.Context, dir string, r *Result, previewScale int) error {
 			return fmt.Errorf("output already exists: %s", dir)
 		}
 		return err
+	}
+	return nil
+}
+
+// WriteRecords writes the records LoadRecords reads (the provisional mask,
+// features, provinces, ownership, and rock classification) into dir, and
+// returns a copy of r's manifest that describes them. A later stage that
+// translates retained records saves them with it.
+func WriteRecords(dir string, r *Result) (Manifest, error) {
+	m := r.Manifest
+	err := writeRecords(dir, r, &m)
+	return m, err
+}
+
+// writeRecords writes r's records into dir and sets their entries in m.
+func writeRecords(dir string, r *Result, m *Manifest) error {
+	g := m.Grid
+	m.GeologyFields, m.Rock = nil, nil
+	if r.Rock != nil {
+		for _, name := range GeologyFields {
+			f := r.Geology[name]
+			if f == nil || f.Columns != g.Columns || f.Rows != g.Rows {
+				return fmt.Errorf("geology field %q is missing or does not match the grid", name)
+			}
+			field, err := continent.WriteField(dir, name, geologyDescriptions[name], f)
+			if err != nil {
+				return err
+			}
+			m.GeologyFields = append(m.GeologyFields, field)
+		}
+		if len(r.Rock) != g.Columns*g.Rows {
+			return fmt.Errorf("rock raster does not match the grid")
+		}
+		m.Rock = &File{File: RockFile, Format: "uint8", SHA256: checksum(r.Rock),
+			Description: "row-major; 0=unclassified, 1=sedimentary, 2=igneous, 3=metamorphic"}
+		if err := os.WriteFile(filepath.Join(dir, RockFile), r.Rock, 0o644); err != nil {
+			return err
+		}
+	}
+	if len(r.Land) != g.Columns*g.Rows || len(r.Owner) != len(r.Land) {
+		return fmt.Errorf("provisional mask or province ownership does not match the grid")
+	}
+	provinces, err := r.Provinces.Marshal()
+	if err != nil {
+		return err
+	}
+	ownership := make([]byte, 0, 4*len(r.Owner))
+	for _, o := range r.Owner {
+		ownership = binary.LittleEndian.AppendUint32(ownership, o)
+	}
+	m.Provinces = File{File: ProvincesFile, Format: ProvincesFormat, SHA256: checksum(provinces),
+		Description: "geological province records"}
+	m.ProvinceOwnership = File{File: OwnershipFile, Format: "uint32 little-endian", SHA256: checksum(ownership),
+		Description: "row-major; the province ID of every cell, never 0"}
+	features, err := r.Features.Marshal()
+	if err != nil {
+		return err
+	}
+	m.ProvisionalLand = File{File: MaskFile, Format: "uint8", SHA256: checksum(r.Land),
+		Description: "row-major; 0=provisional ocean, 1=provisional land; placement data, not the final landmask"}
+	m.Features = File{File: FeaturesFile, Format: FeaturesFormat, SHA256: checksum(features),
+		Description: "authoritative feature records; geometry in km, unwrapped on both axes"}
+	for _, f := range []struct {
+		name string
+		data []byte
+	}{{MaskFile, r.Land}, {ProvincesFile, provinces}, {OwnershipFile, ownership}, {FeaturesFile, features}} {
+		if err := os.WriteFile(filepath.Join(dir, f.name), f.data, 0o644); err != nil {
+			return err
+		}
 	}
 	return nil
 }

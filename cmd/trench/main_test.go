@@ -36,13 +36,16 @@ func TestCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := filepath.Join(t.TempDir(), "trench")
-	args := []string{"--in", sdir, "--out", out, "--seed", "9", "--png-scale", "2"}
+	args := []string{"--in", sdir, "--out", out, "--seed", "9", "--png-scale", "2", "--recenter"}
 	if err := run(t.Context(), args); err != nil {
 		t.Fatal(err)
 	}
 	got, err := trench.Load(t.Context(), out)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !got.Manifest.Recentering.Applied {
+		t.Error("--recenter was not applied")
 	}
 	if got.Manifest.Seed != 9 || got.Manifest.SeedSource != trench.SeedExplicit {
 		t.Errorf("seed %d from %s", got.Manifest.Seed, got.Manifest.SeedSource)

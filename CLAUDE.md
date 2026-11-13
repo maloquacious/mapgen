@@ -50,6 +50,7 @@ Contracts and invariants (wrapping, determinism, land fraction, artifact formats
 
 4. `cmd/trench`: decides which side of each active margin and island arc subducts and places ocean trenches there, from a `structure` artifact, and writes a self-contained trench checkpoint that retains the structure records.
    Active margins subduct opposite their elevated flank; arcs toward the more open water. Trenches follow the parent offshore and are cut where land (ignoring islands under structure's province minimum) or other features are in the way.
+   `--recenter` translates the complete result, structure records included, with the same shift structure's `--recenter` would choose.
    See [cmd/trench/README.md](cmd/trench/README.md).
 
 5. `cmd/terrain`: builds ground and seabed elevation from a `trench` artifact and writes a self-contained terrain checkpoint that retains the structure and trench records.
@@ -68,7 +69,7 @@ The planned generation order is `continents → structure → trench → terrain
 - `internal/continent`: storing and loading the continental artifact.
 - `internal/landmask`: creating, storing, and loading the land/ocean artifact.
 - `internal/structure`: feature records and their validation, toroidal geometry queries, province partitioning, coast interpretation, automatic placement, geology proxies and rock classification, recentering, and the structure artifact.
-- `internal/trench`: subduction polarity, trench placement and clipping, trench records and their validation, and the trench artifact.
+- `internal/trench`: subduction polarity, trench placement and clipping, trench records and their validation, recentering, and the trench artifact.
 - `internal/terrain`: the coast distance transform, the continental foundation, and the terrain artifact.
 - `internal/artifact`: helpers shared by packages that publish artifact directories.
 - `internal/prng`: reproducible random streams derived from a seed and a domain name.

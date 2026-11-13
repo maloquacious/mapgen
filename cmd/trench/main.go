@@ -40,6 +40,7 @@ func run(ctx context.Context, args []string) error {
 	in := fs.String("in", "tmp/structure", "structure input artifact directory")
 	out := fs.String("out", "tmp/trench", "new output artifact directory (must not exist)")
 	seedFlag := fs.String("seed", "", "trench seed, unsigned 64-bit (default: the structure input's seed)")
+	recenter := fs.Bool("recenter", false, "translate the complete result, structure records included, to center the largest provisional landmass")
 	png := fs.Bool("png", true, "write the preview")
 	scale := fs.Int("png-scale", 1, "preview sampling interval in cells; 1 shows every cell")
 	version := fs.Bool("version", false, "print version and exit")
@@ -64,7 +65,7 @@ func run(ctx context.Context, args []string) error {
 		}
 		seed = &v
 	}
-	r, err := trench.Generate(ctx, trench.Options{In: *in, Seed: seed, Version: mapgen.Version().String()})
+	r, err := trench.Generate(ctx, trench.Options{In: *in, Seed: seed, Version: mapgen.Version().String(), Recenter: *recenter})
 	if err != nil {
 		return err
 	}
@@ -77,6 +78,9 @@ func run(ctx context.Context, args []string) error {
 	}
 	m, d := r.Manifest, r.Diagnostics
 	log.Printf("seed %d (%s)", m.Seed, m.SeedSource)
+	if c := m.Recentering; c.Applied {
+		log.Printf("recentered by (%d, %d) cells, (%g, %g) km", c.ShiftX, c.ShiftY, c.ShiftXKM, c.ShiftYKM)
+	}
 	log.Printf("wrote %s: %d subduction zones (%d by elevated flank, %d by open ocean), %d trenches, %.0f km",
 		*out, m.SubductionCount, d.Subduction[trench.BasisFlank], d.Subduction[trench.BasisOcean], m.TrenchCount, d.LengthKM)
 	for _, o := range d.Omitted {
