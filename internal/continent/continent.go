@@ -189,23 +189,14 @@ func Write(dir string, m *Manifest, res *fracture.Result) error {
 		{FieldContinental, "raw continental fracture field (integer valued)", res.Continental},
 		{FieldCoast, "raw coast detail fracture field (integer valued)", res.Coast},
 	} {
-		file := fd.name + ".f32"
-		sum, err := writeAtomic(filepath.Join(dir, file), func(w io.Writer) error { return encode(w, fd.f.Values) })
+		field, err := WriteField(dir, fd.name, fd.desc, fd.f)
 		if err != nil {
 			return fmt.Errorf("%s: %w", fd.name, err)
 		}
-		st := Stats(fd.f.Values)
-		if st.StdDev == 0 {
+		if field.StdDev == 0 {
 			m.Diagnostics = append(m.Diagnostics, fd.name+": field is flat (zero standard deviation)")
 		}
-		m.Fields = append(m.Fields, Field{
-			Name: fd.name, File: file,
-			DType: "float32", ByteOrder: "little-endian",
-			Columns: fd.f.Columns, Rows: fd.f.Rows,
-			SHA256: sum,
-			Min:    st.Min, Max: st.Max, Mean: st.Mean, StdDev: st.StdDev,
-			Description: fd.desc,
-		})
+		m.Fields = append(m.Fields, field)
 	}
 	data, err := json.Marshal(m, json.Deterministic(true), jsontext.WithIndent("  "))
 	if err != nil {
@@ -218,12 +209,38 @@ func Write(dir string, m *Manifest, res *fracture.Result) error {
 	return err
 }
 
+// WriteField saves a float32 raster in an existing directory and describes it.
+// name must be a simple filename stem, without directory components.
+func WriteField(dir, name, description string, f *fracture.FractureField) (Field, error) {
+	if name == "" || name == "." || name == ".." || filepath.Base(name) != name {
+		return Field{}, fmt.Errorf("invalid field name %q", name)
+	}
+	file := name + ".f32"
+	sum, err := writeAtomic(filepath.Join(dir, file), func(w io.Writer) error { return encode(w, f.Values) })
+	if err != nil {
+		return Field{}, err
+	}
+	st := Stats(f.Values)
+	return Field{
+		Name: name, File: file, DType: "float32", ByteOrder: "little-endian",
+		Columns: f.Columns, Rows: f.Rows, SHA256: sum,
+		Min: st.Min, Max: st.Max, Mean: st.Mean, StdDev: st.StdDev,
+		Description: description,
+	}, nil
+}
+
 // ReadManifest loads dir/manifest.json.
 func ReadManifest(dir string) (*Manifest, error) {
 	data, err := os.ReadFile(filepath.Join(dir, ManifestFile))
 	if err != nil {
 		return nil, err
 	}
+	return ParseManifest(data)
+}
+
+// ParseManifest decodes the contents of a manifest.json file. Callers that
+// also checksum the manifest should hash the same bytes they parse.
+func ParseManifest(data []byte) (*Manifest, error) {
 	var m Manifest
 	if err := json.Unmarshal(data, &m); err != nil {
 		return nil, fmt.Errorf("%s: %w", ManifestFile, err)
