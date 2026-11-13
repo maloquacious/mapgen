@@ -7,7 +7,8 @@ The categories below describe what the world contains. Generation stages describ
 ## World requirements
 
 - Earth-like worlds with 30–35 percent land.
-- A physical resolution of 10–25 km per cell.
+- An internal generation resolution of 6 km per cell.
+- A coarser player-facing output resolution of 10–25 km per cell, derived from the generated world.
 - A rectangular playable map that wraps east to west, with no movement across the northern or southern boundaries. This is a cylindrical map.
 - Generation may use an intermediate map that wraps in both directions, called a toroidal map, provided the final world works with the playable boundaries.
 - Convincing continental shapes and mountain systems, coherent climate and ecosystems, and mineral resources.
@@ -153,7 +154,9 @@ A cell has several properties at once. These examples illustrate combinations, n
 | Glaciated range | Mountains | Cold enough for persistent ice | Alpine tundra on exposed ground | Glaciers, rock, snow, meltwater | No assigned deposit |
 | Frozen sea | Seabed basin beneath ocean | Polar | Marine classification, if modeled | Ocean water with sea ice | No assigned deposit |
 
-At 10–25 km per cell, a cell represents an area containing multiple features. Use a dominant category where a simple label is sufficient, and coverage fractions or feature geometry where needed. A river can cross a forest cell without turning the entire cell into open water. An individual peak need not become the elevation of the whole cell.
+Generation uses 6 km cells; the output delivered to players uses coarser cells of 10–25 km. Both represent areas containing multiple features. Use a dominant category where a simple label is sufficient, and coverage fractions or feature geometry where needed. A river can cross a forest cell without turning the entire cell into open water. An individual peak need not become the elevation of the whole cell.
+
+Treat conversion to the player-facing resolution as a separate output step. Preserve the accepted 6 km world so different output resolutions can be produced without regenerating it. The conversion should preserve the relevant meaning of each layer: averaging elevation, summarizing cover fractions, and retaining river connections or discrete deposits require different handling. Because the output spacing need not be an integer multiple of 6 km, conversion cannot assume fixed blocks of whole generation cells.
 
 ## Generation in stages
 

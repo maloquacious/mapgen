@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Michael D Henderson.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-// Command hm generates the continental affinity layer of a world map using
+// Command continents generates continental affinity fields for world generation using
 // the rectangular fracture generator (fracture-rect-v1).
 //
 // The default raster is 6666 x 3333 square cells of 6 km, roughly Earth's
@@ -9,7 +9,7 @@
 // manifest.json, raw float32 rasters for later stages, and an optional PNG
 // preview for inspection.
 //
-//	hm -seed 42 -out tmp/hm
+//	continents -seed 42 -out tmp/continents
 package main
 
 import (
@@ -33,7 +33,7 @@ import (
 
 func main() {
 	log.SetFlags(0)
-	log.SetPrefix("hm: ")
+	log.SetPrefix("continents: ")
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	if err := run(ctx, os.Args[1:]); err != nil {
@@ -72,16 +72,16 @@ func (l *layerFlags) apply(dst *fracture.Layer) {
 }
 
 func run(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("hm", flag.ContinueOnError)
+	fs := flag.NewFlagSet("continents", flag.ContinueOnError)
 	var (
 		seedFlag     = fs.String("seed", "", "world seed, unsigned 64-bit (default: random, printed and recorded)")
-		out          = fs.String("out", "tmp/hm", "output directory")
+		out          = fs.String("out", "tmp/continents", "output directory")
 		cols         = fs.Int("cols", 6666, "raster columns (east-west, wraps)")
 		rows         = fs.Int("rows", 3333, "raster rows (north-south)")
 		cellKM       = fs.Float64("cell-km", 6, "cell size in km (cells are square)")
 		coastWeight  = fs.Float64("coast-weight", float64(fracture.DefaultCoastWeight), "weight of coast detail in the combined affinity")
 		recenter     = fs.Bool("recenter", true, "move the largest provisional landmass to the map center")
-		landFraction = fs.Float64("land-fraction", fracture.DefaultProvisionalLandFraction, "provisional land fraction for recentering and the preview")
+		landFraction = fs.Float64("provisional-land-fraction", fracture.DefaultProvisionalLandFraction, "provisional land fraction for recentering and the preview")
 		png          = fs.Bool("png", true, "write preview.png")
 		pngScale     = fs.Int("png-scale", 1, "preview downsampling factor")
 		showVersion  = fs.Bool("version", false, "print version and exit")
