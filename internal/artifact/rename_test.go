@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Michael D Henderson.
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-package landmask
+package artifact
 
 import (
 	"errors"
@@ -24,13 +24,13 @@ func TestRenameNoReplaceKeepsEmptyDirectory(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(from, "marker"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := renameNoReplace(from, to); !errors.Is(err, fs.ErrExist) {
+	if err := RenameNoReplace(from, to); !errors.Is(err, fs.ErrExist) {
 		t.Fatalf("got %v, want fs.ErrExist", err)
 	}
 	if _, err := os.Stat(filepath.Join(to, "marker")); !os.IsNotExist(err) {
 		t.Fatal("existing directory was replaced")
 	}
-	if err := renameNoReplace(from, filepath.Join(root, "new")); err != nil {
+	if err := RenameNoReplace(from, filepath.Join(root, "new")); err != nil {
 		t.Fatal(err)
 	}
 }

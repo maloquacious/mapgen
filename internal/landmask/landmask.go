@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/maloquacious/mapgen/internal/artifact"
 	"github.com/maloquacious/mapgen/internal/continent"
 	"github.com/maloquacious/mapgen/internal/fracture"
 )
@@ -84,10 +85,10 @@ func Generate(ctx context.Context, dir string, fraction float64, recenter bool, 
 		return nil, err
 	}
 	g := m.Grid
-	if err := validateGrid(g); err != nil {
+	if err := g.Validate(); err != nil {
 		return nil, fmt.Errorf("input: %w", err)
 	}
-	fields, err := readFields(ctx, dir, m)
+	fields, err := continent.ReadFields(ctx, dir, m)
 	if err != nil {
 		return nil, fmt.Errorf("input: %w", err)
 	}
@@ -132,53 +133,7 @@ func Generate(ctx context.Context, dir string, fraction float64, recenter bool, 
 	return r, nil
 }
 
-func positive(v float64) bool  { return v > 0 && !math.IsInf(v, 0) && !math.IsNaN(v) }
-func simpleName(s string) bool { return s != "" && s != "." && s != ".." && filepath.Base(s) == s }
 func checksum(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
-
-// validateGrid rejects grids whose size or spacing is inconsistent.
-func validateGrid(g continent.Grid) error {
-	if g.Columns <= 0 || g.Rows <= 0 || g.Columns > math.MaxInt/4/g.Rows ||
-		!positive(g.WidthKM) || !positive(g.HeightKM) ||
-		!positive(g.CellWidthKM) || !positive(g.CellHeightKM) ||
-		g.CellWidthKM != g.WidthKM/float64(g.Columns) || g.CellHeightKM != g.HeightKM/float64(g.Rows) {
-		return fmt.Errorf("invalid grid")
-	}
-	return nil
-}
-
-// readFields loads and verifies every field listed in m, requiring unique
-// simple names, the manifest's grid, finite values, and the three
-// continental fields later stages depend on.
-func readFields(ctx context.Context, dir string, m *continent.Manifest) (map[string]*fracture.FractureField, error) {
-	g := m.Grid
-	fields := make(map[string]*fracture.FractureField, len(m.Fields))
-	for _, fd := range m.Fields {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if !simpleName(fd.Name) || fields[fd.Name] != nil || !simpleName(fd.File) ||
-			fd.Columns != g.Columns || fd.Rows != g.Rows {
-			return nil, fmt.Errorf("invalid field %q", fd.Name)
-		}
-		f, err := continent.ReadField(dir, m, fd.Name)
-		if err != nil {
-			return nil, err
-		}
-		for _, v := range f.Values {
-			if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
-				return nil, fmt.Errorf("nonfinite value in %s", fd.Name)
-			}
-		}
-		fields[fd.Name] = f
-	}
-	for _, name := range []string{continent.FieldAffinity, continent.FieldContinental, continent.FieldCoast} {
-		if fields[name] == nil {
-			return nil, fmt.Errorf("missing field %s", name)
-		}
-	}
-	return fields, nil
-}
 
 // Write publishes a complete artifact using a sibling temporary directory.
 // An existing output is rejected so accepted checkpoints are not overwritten.
@@ -246,7 +201,7 @@ func Write(ctx context.Context, dir string, r *Result, previewScale int) error {
 		return err
 	}
 	// Never replace a directory that appeared after the check above.
-	if err := renameNoReplace(tmp, dir); err != nil {
+	if err := artifact.RenameNoReplace(tmp, dir); err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return fmt.Errorf("output already exists: %s", dir)
 		}
@@ -269,7 +224,7 @@ func Load(dir string) (*Result, error) {
 		return nil, fmt.Errorf("unsupported landmask format %q", m.Format)
 	}
 	g := m.Grid
-	if err := validateGrid(g); err != nil {
+	if err := g.Validate(); err != nil {
 		return nil, err
 	}
 	if !(m.LandFraction >= 0 && m.LandFraction <= 1) || m.Mask.File != MaskFile || m.Mask.DType != "uint8" {
@@ -303,7 +258,7 @@ func Load(dir string) (*Result, error) {
 			return nil, fmt.Errorf("landmask fields do not match input fields")
 		}
 	}
-	fields, err := readFields(context.Background(), dir, &continent.Manifest{Grid: g, Fields: m.Fields})
+	fields, err := continent.ReadFields(context.Background(), dir, &continent.Manifest{Grid: g, Fields: m.Fields})
 	if err != nil {
 		return nil, err
 	}

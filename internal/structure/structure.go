@@ -1,0 +1,354 @@
+// Copyright (c) 2026 Michael D Henderson.
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+// Package structure creates, stores, and loads the geological structure
+// artifact: the features terrain generation turns into mountains, plateaus,
+// basins, and seabed. See "Structure Generation Design.md".
+//
+// The domain is a torus. Every stage before climate wraps in both directions
+// so the map can be recentered without breaks.
+//
+// This version accepts features only from an explicit fixture file.
+// Provinces, automatic placement, rock classification, and recentering are
+// not implemented; the manifest declares what is absent.
+package structure
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
+	"errors"
+	"fmt"
+	"io/fs"
+	"math"
+	"os"
+	"path/filepath"
+
+	"github.com/maloquacious/mapgen/internal/artifact"
+	"github.com/maloquacious/mapgen/internal/cerrs"
+	"github.com/maloquacious/mapgen/internal/continent"
+	"github.com/maloquacious/mapgen/internal/fracture"
+	"github.com/maloquacious/mapgen/internal/prng"
+)
+
+const (
+	Format          = "mapgen-structure-v1"
+	Selection       = "highest-affinity; ties by input row-major index; round(fraction*cells)"
+	Topology        = "torus: x and y wrap; the map may be recentered until climate"
+	ModeFixture     = "fixture"
+	Absent          = "absent"
+	ManifestFile    = "manifest.json"
+	MaskFile        = "provisional-land.u8"
+	FeaturesFile    = "features.json"
+	DiagnosticsFile = "diagnostics.json"
+	PreviewFile     = "preview.png"
+
+	// ErrNoPlacement is returned when no fixture is supplied.
+	ErrNoPlacement = cerrs.Error("automatic placement is not implemented; supply a feature fixture")
+)
+
+// Input identifies the continental checkpoint by content, not location.
+type Input struct {
+	ManifestSHA256 string             `json:"manifest_sha256"`
+	Manifest       continent.Manifest `json:"manifest"`
+}
+
+// File describes one saved file other than a float32 field.
+type File struct {
+	File        string `json:"file"`
+	Format      string `json:"format"`
+	SHA256      string `json:"sha256"`
+	Description string `json:"description"`
+}
+
+// Manifest describes a structure artifact. It holds only canonical
+// generation data, so identical inputs give identical bytes.
+type Manifest struct {
+	Format                  string            `json:"format"`
+	GeneratorVersion        string            `json:"generator_version"`
+	Input                   Input             `json:"input"`
+	Seed                    uint64            `json:"seed,string"`
+	SeedDerivation          string            `json:"seed_derivation"`
+	PRNG                    string            `json:"prng"`
+	Grid                    continent.Grid    `json:"grid"`
+	Topology                string            `json:"topology"`
+	Mode                    string            `json:"mode"`
+	ProvisionalLandFraction float64           `json:"provisional_land_fraction"`
+	ProvisionalLandCells    int               `json:"provisional_land_cells"`
+	ProvisionalSelection    string            `json:"provisional_selection"`
+	ProvisionalLand         File              `json:"provisional_land"`
+	Features                File              `json:"features"`
+	FeatureCount            int               `json:"feature_count"`
+	Provinces               string            `json:"provinces"`
+	RockClassification      string            `json:"rock_classification"`
+	Diagnostics             File              `json:"diagnostics"`
+	Fields                  []continent.Field `json:"fields"`
+}
+
+// Diagnostics are derived, reviewable facts about a run. They hold no
+// timings, so they are as reproducible as the manifest.
+type Diagnostics struct {
+	Mode     string         `json:"mode"`
+	Placed   map[string]int `json:"placed"`
+	Omitted  []string       `json:"omitted"`
+	Warnings []string       `json:"warnings"`
+}
+
+// Result keeps everything in the same coordinates. In Land, 1 is provisional
+// land and 0 provisional ocean; it is placement data, not a final landmask.
+type Result struct {
+	Manifest    Manifest
+	Land        []byte
+	Fields      map[string]*fracture.FractureField
+	Features    *FeatureFile
+	Diagnostics Diagnostics
+}
+
+// Domain returns the physical extent of the artifact.
+func (r *Result) Domain() Domain {
+	return Domain{WidthKM: r.Manifest.Grid.WidthKM, HeightKM: r.Manifest.Grid.HeightKM}
+}
+
+// Options are the inputs to Generate.
+type Options struct {
+	In       string  // continental artifact directory
+	Seed     uint64  // structure seed; recorded, and reserved for province growth
+	Fraction float64 // provisional land fraction, in [0,1]
+	Features []byte  // contents of a feature fixture; required in this version
+	Version  string  // generator version
+}
+
+func checksum(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
+
+// Generate reads and verifies the continental input, interprets it with a
+// provisional mask, and attaches the fixture's features. The input is never
+// changed, and neither its path nor the fixture's is recorded.
+func Generate(ctx context.Context, o Options) (*Result, error) {
+	if !(o.Fraction >= 0 && o.Fraction <= 1) {
+		return nil, fmt.Errorf("provisional-land-fraction must be in [0,1]")
+	}
+	if o.Features == nil {
+		return nil, ErrNoPlacement
+	}
+	// Parse and checksum the same bytes.
+	data, err := os.ReadFile(filepath.Join(o.In, continent.ManifestFile))
+	if err != nil {
+		return nil, err
+	}
+	m, err := continent.ParseManifest(data)
+	if err != nil {
+		return nil, err
+	}
+	g := m.Grid
+	if err := g.Validate(); err != nil {
+		return nil, fmt.Errorf("input: %w", err)
+	}
+	fields, err := continent.ReadFields(ctx, o.In, m)
+	if err != nil {
+		return nil, fmt.Errorf("input: %w", err)
+	}
+	ff, err := ParseFeatures(o.Features)
+	if err != nil {
+		return nil, err
+	}
+	if err := ff.Validate(Domain{WidthKM: g.WidthKM, HeightKM: g.HeightKM}); err != nil {
+		return nil, err
+	}
+	// Province IDs in a fixture are not trusted, and no provinces exist yet.
+	for i := range ff.Features {
+		ff.Features[i].Provinces = nil
+	}
+	values := fields[continent.FieldAffinity].Values
+	k := int(math.Round(o.Fraction * float64(len(values))))
+	land := make([]byte, len(values))
+	for i, isLand := range fracture.TopMask(values, k) {
+		if isLand {
+			land[i] = 1
+		}
+	}
+	g.Access = "x and y wrap (torus)"
+	r := &Result{
+		Manifest: Manifest{
+			Format: Format, GeneratorVersion: o.Version,
+			Input: Input{ManifestSHA256: checksum(data), Manifest: *m},
+			Seed:  o.Seed, SeedDerivation: prng.DerivationVersion, PRNG: prng.Algorithm,
+			Grid: g, Topology: Topology, Mode: ModeFixture,
+			ProvisionalLandFraction: o.Fraction, ProvisionalLandCells: k, ProvisionalSelection: Selection,
+			FeatureCount: len(ff.Features), Provinces: Absent, RockClassification: Absent,
+		},
+		Land: land, Fields: fields, Features: ff,
+		Diagnostics: Diagnostics{Mode: ModeFixture, Placed: map[string]int{}, Omitted: []string{}, Warnings: ff.Warnings()},
+	}
+	for _, f := range ff.Features {
+		r.Diagnostics.Placed[f.Type]++
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+// Write publishes a complete artifact using a sibling temporary directory.
+// An existing output is rejected so accepted checkpoints are not overwritten.
+// previewScale is 0 to omit the preview, or >=1 to sample every Nth cell.
+func Write(ctx context.Context, dir string, r *Result, previewScale int) error {
+	if previewScale < 0 {
+		return fmt.Errorf("preview scale must not be negative")
+	}
+	dir = filepath.Clean(dir)
+	if _, err := os.Lstat(dir); err == nil {
+		return fmt.Errorf("output already exists: %s", dir)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.MkdirTemp(filepath.Dir(dir), ".structure-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	m := r.Manifest
+	g := m.Grid
+	m.Fields = nil
+	for _, fd := range m.Input.Manifest.Fields {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		f := r.Fields[fd.Name]
+		if f == nil || f.Columns != g.Columns || f.Rows != g.Rows {
+			return fmt.Errorf("result field %q is missing or does not match the grid", fd.Name)
+		}
+		field, err := continent.WriteField(tmp, fd.Name, fd.Description, f)
+		if err != nil {
+			return err
+		}
+		m.Fields = append(m.Fields, field)
+	}
+	if len(r.Land) != g.Columns*g.Rows {
+		return fmt.Errorf("provisional mask does not match the grid")
+	}
+	features, err := r.Features.Marshal()
+	if err != nil {
+		return err
+	}
+	diagnostics, err := json.Marshal(r.Diagnostics, json.Deterministic(true), jsontext.WithIndent("  "))
+	if err != nil {
+		return err
+	}
+	diagnostics = append(diagnostics, '\n')
+	m.ProvisionalLand = File{File: MaskFile, Format: "uint8", SHA256: checksum(r.Land),
+		Description: "row-major; 0=provisional ocean, 1=provisional land; placement data, not the final landmask"}
+	m.Features = File{File: FeaturesFile, Format: FeaturesFormat, SHA256: checksum(features),
+		Description: "authoritative feature records; geometry in km, unwrapped on both axes"}
+	m.Diagnostics = File{File: DiagnosticsFile, Format: "json", SHA256: checksum(diagnostics),
+		Description: "derived placement counts, omissions, and warnings"}
+	manifest, err := json.Marshal(m, json.Deterministic(true), jsontext.WithIndent("  "))
+	if err != nil {
+		return err
+	}
+	for _, f := range []struct {
+		name string
+		data []byte
+	}{{MaskFile, r.Land}, {FeaturesFile, features}, {DiagnosticsFile, diagnostics}, {ManifestFile, append(manifest, '\n')}} {
+		if err := os.WriteFile(filepath.Join(tmp, f.name), f.data, 0o644); err != nil {
+			return err
+		}
+	}
+	if previewScale > 0 {
+		if err := writePreview(ctx, filepath.Join(tmp, PreviewFile), r, previewScale); err != nil {
+			return err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp, 0o755); err != nil {
+		return err
+	}
+	// Never replace a directory that appeared after the check above.
+	if err := artifact.RenameNoReplace(tmp, dir); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return fmt.Errorf("output already exists: %s", dir)
+		}
+		return err
+	}
+	return nil
+}
+
+// Load reads an artifact and verifies its checksums, mask, fields, and
+// features. The result does not depend on the continental input directory.
+func Load(ctx context.Context, dir string) (*Result, error) {
+	data, err := os.ReadFile(filepath.Join(dir, ManifestFile))
+	if err != nil {
+		return nil, err
+	}
+	var m Manifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("%s: %w", ManifestFile, err)
+	}
+	if m.Format != Format {
+		return nil, fmt.Errorf("unsupported structure format %q", m.Format)
+	}
+	g := m.Grid
+	if err := g.Validate(); err != nil {
+		return nil, err
+	}
+	read := func(f File, name string) ([]byte, error) {
+		if f.File != name {
+			return nil, fmt.Errorf("manifest names %q where %q is expected", f.File, name)
+		}
+		b, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return nil, err
+		}
+		if checksum(b) != f.SHA256 {
+			return nil, fmt.Errorf("%s: checksum mismatch", name)
+		}
+		return b, nil
+	}
+	land, err := read(m.ProvisionalLand, MaskFile)
+	if err != nil {
+		return nil, err
+	}
+	count := 0
+	for _, v := range land {
+		if v > 1 {
+			return nil, fmt.Errorf("invalid provisional mask value %d", v)
+		}
+		count += int(v)
+	}
+	if len(land) != g.Columns*g.Rows || count != m.ProvisionalLandCells {
+		return nil, fmt.Errorf("provisional mask size or count mismatch")
+	}
+	fdata, err := read(m.Features, FeaturesFile)
+	if err != nil {
+		return nil, err
+	}
+	ff, err := ParseFeatures(fdata)
+	if err != nil {
+		return nil, err
+	}
+	if err := ff.Validate(Domain{WidthKM: g.WidthKM, HeightKM: g.HeightKM}); err != nil {
+		return nil, err
+	}
+	if len(ff.Features) != m.FeatureCount {
+		return nil, fmt.Errorf("feature count mismatch")
+	}
+	ddata, err := read(m.Diagnostics, DiagnosticsFile)
+	if err != nil {
+		return nil, err
+	}
+	var d Diagnostics
+	if err := json.Unmarshal(ddata, &d); err != nil {
+		return nil, fmt.Errorf("%s: %w", DiagnosticsFile, err)
+	}
+	fields, err := continent.ReadFields(ctx, dir, &continent.Manifest{Grid: g, Fields: m.Fields})
+	if err != nil {
+		return nil, err
+	}
+	return &Result{Manifest: m, Land: land, Fields: fields, Features: ff, Diagnostics: d}, nil
+}

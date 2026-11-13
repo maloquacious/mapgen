@@ -40,7 +40,11 @@ Contracts and invariants (wrapping, determinism, land fraction, artifact formats
 2. `cmd/landmask`: selects exactly `round(fraction * cells)` land cells by affinity from a `continents` artifact and writes a self-contained land/ocean checkpoint.
    See [cmd/landmask/README.md](cmd/landmask/README.md).
 
-Later stages (elevation, mountains, drainage, climate, biomes, geology) are not implemented yet.
+3. `cmd/structure`: attaches geological features (belts, rifts, arcs, faults, plateaus, basins) to a `continents` artifact and writes a self-contained structure checkpoint.
+   So far it takes features only from an explicit fixture file; provinces, automatic placement, rock classification, and recentering are not implemented.
+   See [cmd/structure/README.md](cmd/structure/README.md).
+
+Later stages (terrain, the terrain-based landmask, drainage, climate, biomes, resources) are not implemented yet.
 
 The planned generation order is `continents → structure → terrain → landmask → drainage → climate → ecosystems`, with resources depending on geology. The current affinity-based landmask command remains useful for inspection; final coastline acceptance will require a terrain-input mode. Do not assume its present continental-input artifact freezes coastlines before geological structure in the default pipeline.
 
@@ -50,6 +54,8 @@ The planned generation order is `continents → structure → terrain → landma
 - `internal/fracture`: the disc-sum fracture field generator and recentering.
 - `internal/continent`: storing and loading the continental artifact.
 - `internal/landmask`: creating, storing, and loading the land/ocean artifact.
+- `internal/structure`: feature records and their validation, toroidal geometry queries, and the structure artifact.
+- `internal/artifact`: helpers shared by packages that publish artifact directories.
 - `internal/prng`: reproducible random streams derived from a seed and a domain name.
 - `internal/cerrs`: constant sentinel errors.
 - `internal/dotenv`: environment file loading.

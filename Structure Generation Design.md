@@ -312,10 +312,12 @@ Loading a feature file fails, naming the feature ID, when:
 - a required field for the type is missing, or an unknown field is present;
 - a number is not finite, a width or `edge_km` is not positive, or a range has `min > max`;
 - a first vertex is not in `[0, width_km)` by `[0, height_km)`, or a segment spans half the world or more on either axis;
-- an outline is not simple, or a backbone has a zero-length segment.
+- an outline is not simple, is as wide or as tall as the world, or any geometry has a zero-length segment;
+- a basin's parent is not a `mountain_belt`, `rift`, or `island_arc`.
 
 Self-intersection, tight-bend, and overlap rules belong to automatic placement.
 A fixture that breaks them loads with a recorded warning, so awkward cases can be drawn deliberately.
+Until automatic placement defines the bend and overlap rules, the only warning is a backbone that crosses itself.
 
 ### Fixture mode
 

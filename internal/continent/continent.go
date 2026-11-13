@@ -13,6 +13,7 @@ package continent
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -376,4 +377,51 @@ func writeAtomic(path string, fill func(io.Writer) error) (sum string, err error
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func positive(v float64) bool  { return v > 0 && !math.IsInf(v, 0) && !math.IsNaN(v) }
+func simpleName(s string) bool { return s != "" && s != "." && s != ".." && filepath.Base(s) == s }
+
+// Validate rejects grids whose size or spacing is inconsistent.
+func (g Grid) Validate() error {
+	if g.Columns <= 0 || g.Rows <= 0 || g.Columns > math.MaxInt/4/g.Rows ||
+		!positive(g.WidthKM) || !positive(g.HeightKM) ||
+		!positive(g.CellWidthKM) || !positive(g.CellHeightKM) ||
+		g.CellWidthKM != g.WidthKM/float64(g.Columns) || g.CellHeightKM != g.HeightKM/float64(g.Rows) {
+		return fmt.Errorf("invalid grid")
+	}
+	return nil
+}
+
+// ReadFields loads and verifies every field listed in m, requiring unique
+// simple names, the manifest's grid, finite values, and the three
+// continental fields later stages depend on.
+func ReadFields(ctx context.Context, dir string, m *Manifest) (map[string]*fracture.FractureField, error) {
+	g := m.Grid
+	fields := make(map[string]*fracture.FractureField, len(m.Fields))
+	for _, fd := range m.Fields {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if !simpleName(fd.Name) || fields[fd.Name] != nil || !simpleName(fd.File) ||
+			fd.Columns != g.Columns || fd.Rows != g.Rows {
+			return nil, fmt.Errorf("invalid field %q", fd.Name)
+		}
+		f, err := ReadField(dir, m, fd.Name)
+		if err != nil {
+			return nil, err
+		}
+		for _, v := range f.Values {
+			if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+				return nil, fmt.Errorf("nonfinite value in %s", fd.Name)
+			}
+		}
+		fields[fd.Name] = f
+	}
+	for _, name := range []string{FieldAffinity, FieldContinental, FieldCoast} {
+		if fields[name] == nil {
+			return nil, fmt.Errorf("missing field %s", name)
+		}
+	}
+	return fields, nil
 }
