@@ -200,7 +200,7 @@ Integer interval endpoints are authoritative. Do not replace constant discs with
 
 ## Sampling contract
 
-Expose a bilinear Sample(xKM,yKM) over the canonical scalar raster using center coordinates. Wrap both axes internally while generating and recentring. After recentring, the public ContinentSource used by later cylindrical stages wraps x and clamps y to the first or last source row center. The stored source raster remains the same; the access policy changes.
+Expose a bilinear Sample(xKM,yKM) over the canonical scalar raster using center coordinates. Wrap both axes internally while generating and recentring. Every stage before climate reads the source as a torus, wrapping both axes, so the map can be recentered at any of those stages. The public ContinentSource used by the cylindrical stages, from climate onward, wraps x and clamps y to the first or last source row center. The stored source raster remains the same; the access policy changes.
 
 For bilinear interpolation compute tx = x/sx-0.5 and ty = y/sy-0.5 before taking integer floor indices. Exact periodic x queries MUST agree at x, x+Lx, and x-Lx. Opposite edge columns need not have equal values.
 
@@ -212,7 +212,7 @@ Recentering is optional and defaults on. Build a provisional mask containing exa
 
 Compute circular means from rectangular cell center angles. Choose integer shifts that place the mean nearest the domain center. Any integer x shift is valid because there is no stagger. If resultant magnitude divided by component size is below 0.000001 for an axis, use shift zero on that axis. Record both shifts. Apply the same shifts to every retained source layer.
 
-The provisional mask is only for placement. The final ocean mask and final land count remain the responsibility of the parent pipeline after regional terrain construction. At that transition remove north south adjacency permanently. The largest component can split when the torus is cut; label final landmasses again on the cylinder.
+The provisional mask is only for placement. The final ocean mask and final land count remain the responsibility of the parent pipeline after regional terrain construction. North south adjacency is removed permanently at the climate stage, not at this transition. The largest component can split when the torus is cut; label final landmasses again on the cylinder.
 
 # Go module contract and execution order
 
@@ -268,7 +268,7 @@ Required checks:
 
 5. Radius sampling returns finite values in configured bounds; verify empirical quantiles against the CDF with a fixed large sample and a declared tolerance.
 
-6. Torus generation queries are periodic in both axes. Public cylindrical sampling wraps x and clamps y. Test them separately.
+6. Torus generation queries are periodic in both axes. Public cylindrical sampling, used from climate onward, wraps x and clamps y. Test them separately.
 
 7. Canonical field and shifts are unchanged when final game spacing changes from 10 to 25 km at fixed physical extent and source configuration.
 

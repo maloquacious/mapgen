@@ -11,13 +11,15 @@ func (f *FractureField) At(col, row int) float32 {
 }
 
 // SampleTorus interpolates bilinearly between cell centers, wrapping both
-// axes. Use it during generation, before the torus is cut.
+// axes. Use it in every stage before climate, while the map is a torus and
+// can still be recentered.
 func (f *FractureField) SampleTorus(xKM, yKM float64) float64 {
 	return f.sample(xKM, yKM, true)
 }
 
-// ContinentSource is the public access policy for later cylindrical stages:
-// x wraps, y clamps to the first and last row centers.
+// ContinentSource is the access policy for cylindrical stages, from climate
+// onward: x wraps, y clamps to the first and last row centers. Stages before
+// climate must use SampleTorus on the field instead.
 type ContinentSource struct {
 	f *FractureField
 }

@@ -158,7 +158,7 @@ func NewManifest(generatorVersion string, res *fracture.Result) *Manifest {
 			CellWidthKM: f.CellWidthKM(), CellHeightKM: f.CellHeightKM(),
 			IndexOrder: "row-major: index = row*columns + col; row 0 is north",
 			CellCenter: "((col+0.5)*cell_width_km, (row+0.5)*cell_height_km)",
-			Access:     "x wraps; y clamps to first/last row center (cylinder)",
+			Access:     "before climate: x and y wrap (torus); from climate onward: x wraps, y clamps to first/last row center (cylinder)",
 		},
 		Continental: layer(fracture.DomainContinental, p.Continental),
 		Coast:       layer(fracture.DomainCoast, p.Coast),

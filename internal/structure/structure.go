@@ -148,6 +148,8 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 	if err := g.Validate(); err != nil {
 		return nil, fmt.Errorf("input: %w", err)
 	}
+	// This stage is a torus whatever the input's manifest says of later ones.
+	g.Access = "x and y wrap (torus)"
 	fields, err := continent.ReadFields(ctx, o.In, m)
 	if err != nil {
 		return nil, fmt.Errorf("input: %w", err)
@@ -171,7 +173,6 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 			land[i] = 1
 		}
 	}
-	g.Access = "x and y wrap (torus)"
 	// The input's seed is a safe default: each stage draws from streams keyed
 	// by its own domain names, so sharing a seed does not correlate them.
 	seed, source := m.Seed, SeedFromInput
