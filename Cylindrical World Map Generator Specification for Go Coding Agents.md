@@ -1,6 +1,6 @@
 # Abstract
 
-This specification defines a deterministic generator for Earth like game worlds on a rectangular grid that wraps east to west and has closed northern and southern boundaries. Cells represent 10 to 25 km. The target ocean complement is 30 to 35 percent non ocean area. The implementation language is Go.
+This specification defines a deterministic generator for Earth like game worlds on a rectangular grid that wraps east to west and has closed northern and southern boundaries. Internal generation uses 6 km cells; player-facing output uses 10 to 25 km cells derived later. The target ocean complement is 30 to 35 percent non ocean area. The implementation language is Go.
 
 The generator preserves a supplied fracture based continental layout, constructs geological provinces and explicit mountain belts, establishes coherent drainage, computes seasonal climate and runoff, and assigns biomes and mineral deposits. Regional landforms are synthesized directly rather than produced by a long tectonic simulation. Mountain shape is controlled through related ridges, plateaus, structural basins, and drainage corridors.
 
@@ -12,9 +12,9 @@ MUST denotes a correctness requirement. SHOULD denotes a preferred implementatio
 
 The reference implementation MUST:
 
-1. Generate a cylinder with east west continuity and no north south adjacency.
+1. Generate a final world that is a cylinder with east west continuity and no north south adjacency. Stages before climate are periodic in both axes; see section 2.
 
-2. Accept a physical cell spacing from 10 through 25 km.
+2. Generate internally at 6 km physical cell spacing and support later output conversion to 10 through 25 km per cell.
 
 3. Produce a configured non ocean fraction from 0.30 through 0.35, within one cell of the requested rounded count.
 
@@ -36,7 +36,9 @@ The continent source is defined in the [Fracture Continent Generator Implementat
 
 Let W and H be raster dimensions and d be cell spacing in km. Physical dimensions are Lx = W d and Ly = H d. Raster index is i = y W + x. Cell centers are at ((x + 0.5)d, (y + 0.5)d). North is decreasing y. Elevations and relief use meters; distances use km unless explicitly converted; water depths use mm per seasonal interval; discharge uses cubic meters per second.
 
-Use cardinal neighbors for conservative transport and eight neighbors for terrain routing. Diagonal edge length is sqrt(2)d. A neighbor outside y in [0,H) does not exist. Horizontal indices wrap with a positive modulo.
+Use cardinal neighbors for conservative transport and eight neighbors for terrain routing. Diagonal edge length is sqrt(2)d. Horizontal indices wrap with a positive modulo.
+
+The map can be recentered at any stage before climate, so every stage before climate (continents, structure, terrain, landmask, and drainage) is toroidal: vertical indices also wrap with a positive modulo, and the vertical displacement uses the same formula as dx with Ly in place of Lx. From climate onward the domain is a cylinder: a neighbor outside y in [0,H) does not exist, and no recentering is available. Where a section for a stage before climate says periodic x, x wraps, or y clamps, read it as periodic in both axes. The climate stage is responsible for whatever lies across the northern and southern edges when it fixes them.
 
 The signed horizontal displacement from a to b is:
 
@@ -44,7 +46,7 @@ The signed horizontal displacement from a to b is:
 dx = (b.x - a.x) - Lx * floor((b.x - a.x)/Lx + 0.5)
 ```
 
-The exact half circumference tie resolves toward negative dx. All feature distance queries, spatial indexing, interpolation, derivatives, and raster filters MUST follow the same convention. Ridge and coast polylines MUST be stored in locally unwrapped coordinates or explicitly split at the seam. Ordinary Euclidean distance across the rectangle is incorrect.
+The exact half circumference tie resolves toward negative dx. All feature distance queries, spatial indexing, interpolation, derivatives, and raster filters MUST follow the same convention. Ridge and coast polylines MUST be stored in locally unwrapped coordinates, on both axes while the domain is toroidal, or explicitly split at the seam. Ordinary Euclidean distance across the rectangle is incorrect.
 
 Assigned latitude is phi(y) = 90 degrees - 180 degrees \* (y + 0.5)/H. It controls climate only; cell area remains d squared. This is a cylindrical game domain, not an equal angle spherical raster.
 
@@ -96,9 +98,11 @@ type Stage interface {
 }
 ```
 
-Higher continent source values mean greater continental affinity. The source MUST be periodic in x. A source periodic in both axes is allowed only in this initial stage.
+Higher continent source values mean greater continental affinity. The source MUST be periodic in both axes, so that it can be recentered with the stages that follow.
 
 # 4 Pipeline and stage contracts
+
+The command and checkpoint boundaries for provinces and geological events are refined in [Structure Generation Design](<Structure Generation Design.md>). The planned command order is `continents → structure → terrain → landmask`; geological structure uses a provisional coast, while final ocean membership is accepted only after terrain generation. The current affinity-based landmask command requires a terrain-input mode to implement that final selection.
 
 ```mermaid
 flowchart TD
@@ -345,7 +349,8 @@ Every build MUST pass topology, accounting, and routing checks before visual eva
 | Check | Required result |
 | - | - |
 | East west neighbors | Opposite edge cells are adjacent with physical distance d |
-| North south neighbors | No edge leaves the domain |
+| North south neighbors | Before climate: opposite edge cells are adjacent with physical distance d. From climate onward: no edge leaves the domain |
+| Recentering | Before climate: a whole cell translation on either axis changes no adjacency, distance, or feature relationship |
 | Land accounting | Non ocean count equals requested rounded count |
 | Ocean identity | Ocean mask satisfies its connectivity contract |
 | Drainage | Every non ocean cell reaches an ocean through receivers |

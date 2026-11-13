@@ -14,7 +14,8 @@ Prefer building reusable tools to ad-hoc shell pipelines; see [TOOLING.md](TOOLI
 - Earth-like worlds with 30–35 percent land.
 - An internal generation resolution of 6 km per cell; player-facing output at 10–25 km per cell, derived later.
 - A cylindrical playable map: it wraps east to west, and nothing crosses the northern or southern edge.
-  Intermediate stages may wrap in both directions (toroidal) as long as the final world respects the playable boundaries.
+  Every stage before climate wraps in both directions (toroidal), so the map can be recentered at any of those stages without breaks.
+  The northern and southern edges become fixed at the climate stage; no recentering is available from then on.
 - Convincing continents and mountain systems, coherent drainage, climate, biomes, geology, and mineral resources.
 - Staged generation: each stage writes a self-contained artifact directory, so a user can keep accepted results through one stage and try different seeds for a later one.
 
@@ -25,6 +26,7 @@ These documents in the repository root define the design. Read the relevant one 
 - [World Map Layers and Generation Stages.md](<World Map Layers and Generation Stages.md>): vocabulary for map categories (topography, landforms, climate, hydrology, biomes, surface cover, geology and ores) and the staged workflow.
 - [Cylindrical World Map Generator Specification for Go Coding Agents.md](<Cylindrical World Map Generator Specification for Go Coding Agents.md>): the overall generator; coordinates, wrapping rules, state model, determinism, and the MUST requirements.
 - [Fracture Continent Generator Implementation Specification.md](<Fracture Continent Generator Implementation Specification.md>): the continent source, adapted from mdhender/hamwold at a pinned commit.
+- [Structure Generation Design.md](<Structure Generation Design.md>): geological structure before terrain and final coastline selection, feature records, checkpoints, previews, and integration changes.
 
 `docs/` holds reference material: research papers (`docs/research/`, PDFs are git-ignored) and the USGS land use classification.
 
@@ -39,6 +41,8 @@ Contracts and invariants (wrapping, determinism, land fraction, artifact formats
    See [cmd/landmask/README.md](cmd/landmask/README.md).
 
 Later stages (elevation, mountains, drainage, climate, biomes, geology) are not implemented yet.
+
+The planned generation order is `continents → structure → terrain → landmask → drainage → climate → ecosystems`, with resources depending on geology. The current affinity-based landmask command remains useful for inspection; final coastline acceptance will require a terrain-input mode. Do not assume its present continental-input artifact freezes coastlines before geological structure in the default pipeline.
 
 ## Layout
 
@@ -55,7 +59,7 @@ Later stages (elevation, mountains, drainage, climate, biomes, geology) are not 
 - Every Go file starts with the copyright line and `SPDX-License-Identifier: AGPL-3.0-or-later`.
   Preserve upstream attribution when adapting hamwold code.
 - Rasters are flat slices, row-major (`index = row*cols + col`), row 0 at the north, float32 little-endian on disk with no header.
-- Horizontal indices wrap with a positive modulo; rows do not wrap in the playable map.
+- Horizontal indices wrap with a positive modulo. Rows also wrap in every stage before climate; they do not wrap from climate onward or in the playable map.
   Distances and filters must follow the wrapping convention in the cylindrical specification.
 - Randomness comes only from `internal/prng` streams, keyed by a stable domain name, never from global or time-based sources.
 - Artifacts never record input paths, so identical inputs give identical outputs wherever they are stored.

@@ -10,7 +10,8 @@ The categories below describe what the world contains. Generation stages describ
 - An internal generation resolution of 6 km per cell.
 - A coarser player-facing output resolution of 10–25 km per cell, derived from the generated world.
 - A rectangular playable map that wraps east to west, with no movement across the northern or southern boundaries. This is a cylindrical map.
-- Generation may use an intermediate map that wraps in both directions, called a toroidal map, provided the final world works with the playable boundaries.
+- Generation uses a map that wraps in both directions, called a toroidal map, for every stage before climate. The map can be recentered at any of those stages without creating breaks.
+- The northern and southern boundaries become fixed at the climate stage. No recentering is available from then on.
 - Convincing continental shapes and mountain systems, coherent climate and ecosystems, and mineral resources.
 - Practical generation time and the ability to regenerate individual stages.
 
@@ -162,16 +163,20 @@ Treat conversion to the player-facing resolution as a separate output step. Pres
 
 Each stage consumes explicit inputs and produces a saved result. Give each randomized stage its own seed so changing a later seed does not change earlier results.
 
-The following is a starting workflow, not a fixed algorithm:
+Geological structure and terrain are generated before final coastline selection. The provisional coast used to place features can change as terrain is generated. The final landmask freezes ocean membership only after elevation exists. See [Structure Generation Design](<Structure Generation Design.md>) for the stage boundary and planned commands.
 
 | Stage | Main result | Example of what the user can vary |
 | --- | --- | --- |
-| 1. World layout | Continents, islands, ocean and land distribution | Continental seed while retaining world dimensions and target land fraction |
-| 2. Geological structure and terrain | Geological regions, rock types, mountain systems, elevation and relief | Mountain layout while retaining accepted continents |
-| 3. Drainage preparation | Drainage routes, basins, candidate lakes, any required terrain corrections | Drainage alternatives while retaining the accepted terrain input |
-| 4. Climate and water balance | Climate, runoff, river flow, lake and wetland conditions | Climate alternatives while retaining accepted terrain and drainage |
-| 5. Ecosystems and surface cover | Biomes, vegetation, exposed ground, snow and ice | Ecological variation consistent with accepted physical conditions |
-| 6. Mineral resources | Ore occurrences, chosen by rock type | Deposit placement while retaining accepted geology and surface world |
+| 1. Continental foundation | Continental affinity and provisional continental layout | Continental seed while retaining world dimensions |
+| 2. Geological structure | Geological regions, mountain belts, plateaus, basins, and geological context for rock classification | Structural placement while retaining accepted continental affinity |
+| 3. Terrain | Ground and seabed elevation, detailed ridges, valleys, and relief | Mountain detail while retaining accepted structure |
+| 4. Final landmask | Sea-level reference and frozen ocean membership at the requested fraction | Coastline selection settings against accepted terrain |
+| 5. Drainage preparation | Drainage routes, basins, candidate lakes, any required terrain corrections | Drainage alternatives while retaining accepted terrain and ocean membership |
+| 6. Climate and water balance | Climate, runoff, river flow, lake and wetland conditions | Climate alternatives while retaining accepted terrain and drainage |
+| 7. Ecosystems and surface cover | Biomes, vegetation, exposed ground, snow and ice | Ecological variation consistent with accepted physical conditions |
+| 8. Mineral resources | Ore occurrences, chosen by rock type | Deposit placement while retaining accepted geology and surface world |
+
+The existing affinity-based `cmd/landmask` is available for layout inspection. The final pipeline requires a terrain-input mode; that mode is not implemented yet. Accepting a continental foundation or geological structure does not freeze exact coastlines.
 
 Stages have dependencies, not merely a numerical order. Resource placement may depend on geology without depending on vegetation. Snow cover depends on climate; drainage routes depend on terrain; river flow also depends on precipitation. A stage need not use randomness if its inputs determine its result.
 
