@@ -33,11 +33,11 @@ Virtual terrains, although they usually serve as background elements, are import
 Designing controllable and efficient algorithms for generating terrains remains an important and open problem in computer graphics.
 
 There is a large body of previous work on terrain modeling going back nearly 35 years.
-The first algorithms were inspired by fractals and noise generators [FFC82, EMP*02].
+The first algorithms were inspired by fractals and noise generators [FFC82, EMP\*02].
 More realism was later achieved by using physical and geological considerations, such as simulating hydraulic erosion [MKM89, BF02] to improve existing terrains.
 Example-based algorithms [ZSTR07, GMM15] provide a high level of control but are limited to the landform features provided by exemplars and usually cannot generate new geological structures.
 In contrast, erosion simulations [BF02, BTHB06] directly generate realistic dendritic ridges and drainage structures, but these approaches are computationally demanding and therefore ill suited for generating large terrains with a high level of detail.
-Using interactive modeling systems such as [GMS09, TEC*14] to create terrain models can be tedious and may not match geological constraints.
+Using interactive modeling systems such as [GMS09, TEC\*14] to create terrain models can be tedious and may not match geological constraints.
 
 The key observation of our work is that terrains and mountains are formed by various mutually interacting physical processes acting at geological time and spatial scales [BFH92].
 In order to capture its action at large spatial and temporal scales, mountain development should be taken into account.
@@ -51,7 +51,7 @@ From this input, and a random planar graph covering the region on the map, we it
 The original method from [BW13] is extended to efficiently model water flowing from lakes.
 This simulation process produces a stream graph derived from the initial graph.
 The graph is augmented with stream directions along edges and elevation information at the nodes.
-The graph can either be converted into an elevation map by interpolating the elevation information between streams for real-time visualization, or converted into a primitive-based terrain model with a high level of detail embedding riverbeds, ridges and valleys, using a combination of parameterized terrain primitives introduced in [GGP*15] and automatic terrain amplification [GDPG16].
+The graph can either be converted into an elevation map by interpolating the elevation information between streams for real-time visualization, or converted into a primitive-based terrain model with a high level of detail embedding riverbeds, ridges and valleys, using a combination of parameterized terrain primitives introduced in [GGP\*15] and automatic terrain amplification [GDPG16].
 
 The terrain at the right of Figure 1 was generated using our method from the simple uplift map depicted on the left.
 The simulation process runs at interactive rates.
@@ -61,24 +61,24 @@ The interactive visual feedback enables users to interrupt the process before co
 ## 2. Related Work
 
 In this section, we review the existing approaches for terrain generation and focus on the level of user control, efficiency, and realism.
-For recent surveys on procedural terrain synthesis methods we refer the reader to [NLP*13, STBB14].
+For recent surveys on procedural terrain synthesis methods we refer the reader to [NLP\*13, STBB14].
 
 **Procedural terrain generation** is usually based on fractals and these approaches are among the most commonly used in computer graphics.
 Fractal-based methods exploit the observation that primary terrain features repeat at different scales.
-Ebert *et al.* [EMP*02] provide an overview of these methods, including various noises, such as the fractional Brownian motion [MVN68] and the adaptive subdivision method [FFC82].
+Ebert *et al.* [EMP\*02] provide an overview of these methods, including various noises, such as the fractional Brownian motion [MVN68] and the adaptive subdivision method [FFC82].
 These algorithms only provide indirect control over the resulting terrain by modifying the input parameters of the algorithm [SBW06].
 Moreover, they lack geological realism because the distribution of generated structures follows stochastic patterns observed only on relatively new mountain ranges.
 The geological structures formed by fluvial erosion, such as networks of parallel valleys, are not captured by these methods.
 
-To improve the user control of fractal-based methods, several algorithms were used that attempted to model terrain generation from a set of 3D feature curves used to specify ridges and river networks [KMN88, HGA*10] or from a user-defined hydrology map [GGG*13].
+To improve the user control of fractal-based methods, several algorithms were used that attempted to model terrain generation from a set of 3D feature curves used to specify ridges and river networks [KMN88, HGA\*10] or from a user-defined hydrology map [GGG\*13].
 Although these methods generate plausible river networks, they generally do not capture large scale landform features and patterns where the elevation is not exclusively explained by the presence of rivers and streams.
 
 **Terrain editing and synthesis by example** combine high-level user control by re-using (parts of) existing terrain models to generate new ones.
 Many example-based methods are inspired from texture synthesis; for example they exploit a user-painted coarse map to control the combination of patches extracted from real terrain data [ZSTR07].
 Real terrains were also used to add details to an existing terrain model [BSS07].
 These approaches were later improved to enable the combination of user-defined maps with silhouette strokes defining roughness [GMS09, PGGM09, GMM15].
-Sketched terrain silhouettes were used to deform an existing terrain to conform to a view from a certain viewpoint [TEC*14].
-Another approach uses examples of primitives that are combined into mathematical trees to define terrains [GGP*15].
+Sketched terrain silhouettes were used to deform an existing terrain to conform to a view from a certain viewpoint [TEC\*14].
+Another approach uses examples of primitives that are combined into mathematical trees to define terrains [GGP\*15].
 The difficulty of these approaches is to fine tune plausible results in detailed regions where the input terrains are combined or deformed.
 Moreover, these methods fail to generate large scale realism, because the land forming physical processes are not taken into account.
 
@@ -88,7 +88,7 @@ Both approaches were coupled with fractal terrain generations.
 Chiba *et al.* [CMF98] and Benes and Forsbach [BF02] detailed the hydraulic erosion by using the simulation of water flow, followed by dissolution of soil, transportation and deposition.
 These methods were later improved by adopting the Navier-Stokes equations on a 3D voxel grid in [BTHB06] and by enabling the interactive sculpting of the input terrain through erosion strokes in [VBHS11].
 Landslides (mass erosion) were modeled by combining discrete element methods and particle hydrodynamics [Hv11].
-Various approaches apply small-scale erosion models such as weathering of statues [DEJP99], Voronoi-based block erosion for modeling cliffs [PGGM09], spheroidal erosion for modeling of goblins [BFO*07], corrosion simulation [WCMT07], and small-scale volumetric mountains and rocks [TJ10].
+Various approaches apply small-scale erosion models such as weathering of statues [DEJP99], Voronoi-based block erosion for modeling cliffs [PGGM09], spheroidal erosion for modeling of goblins [BFO\*07], corrosion simulation [WCMT07], and small-scale volumetric mountains and rocks [TJ10].
 
 Erosion models add high quality realistic details to existing terrains but, despite several attempts to provide interactive and GPU implementations [NWD05, MDH07, VBHS11], they suffer from long computational times and low controllability.
 In contrast, our approach couples the simulation of tectonic uplift and hydraulic erosion to generate mountain ranges that are consistent at a large scale with simple and efficient user-control.
@@ -177,7 +177,7 @@ The resulting stream graph $\mathcal{G}$ has the same topology as the initial gr
 The first, which can be used to visualize the simulation at interactive rates, uses a simple interpolation scheme to define $h$ from the elevations $h_k$.
 
 The second method targets off-line high-quality rendering and generates a detailed terrain from the data embedded in the stream graph.
-This is achieved by combining procedural function-based primitives representing landform features as described in [GGP*15], which enables us to add visual details such as ridges, valleys, and river beds.
+This is achieved by combining procedural function-based primitives representing landform features as described in [GGP\*15], which enables us to add visual details such as ridges, valleys, and river beds.
 
 ## 4. Stream Generation
 
@@ -370,7 +370,7 @@ The height is then normalized by the sum of the kernels at that point.
 This results in a smoother geometry than the Phong tessellation, but it is harder to emphasize the water network.
 
 The third method is not interactive because it is based on a high level of detail terrain representation.
-This representation is obtained by converting the stream graph model into a hierarchical primitive-based model, as described in [GGG*13, GGP*15].
+This representation is obtained by converting the stream graph model into a hierarchical primitive-based model, as described in [GGG\*13, GGP\*15].
 This model combines parameterized terrain primitives representing the different landform features (ridges, valleys, and rivers) into a hierarchical construction tree.
 This identification of landform features and the selection of the corresponding primitives is performed automatically by analyzing the coarse terrain elevation map produced by the stream power erosion process as described in [GDPG16].
 Rivers are carved by using the elevation and drainage information embedded in the graph (Figure 11).
@@ -413,7 +413,7 @@ Because our method generates the coverage of the terrain by the river and lake n
 
 ![Figure 9](2016-Large-Scale-Terrain/figure-09.jpg)
 
-**Figure 9:** The graph representing the terrain was rendered by using a set of function-based primitives corresponding to different landform features which are parameterized by the data embedded in the stream graph [GGP*15].
+**Figure 9:** The graph representing the terrain was rendered by using a set of function-based primitives corresponding to different landform features which are parameterized by the data embedded in the stream graph [GGP\*15].
 This method provides varying level of detail as can be seen in this successive zoom (from left to right).
 
 The **erosion parameters** in the stream power erosion are not intuitive to set.
@@ -543,21 +543,21 @@ It would be interesting to exploit parallel implementation and one option would 
 - **[BA08]** Boubekeur T., Alexa M.: Phong tessellation. *ACM Trans. Graph. 27*, 5 (Dec. 2008), 141:1–141:5.
 - **[BF02]** Benes B., Forsbach R.: Visual simulation of hydraulic erosion. In *Proceedings of the WSCG* (2002), pp. 120–132.
 - **[BFH92]** Beaumont C., Fullsack P., Hamilton J.: Erosional control of active compressional orogens. In *Thrust Tectonics* (New York, 1992), Chapman and Hall, pp. 1–18.
-- **[BFO*07]** Beardall M., Farley M., Ouderkirk D., Reimschussel C., Smith J., Jones M., Egbert P.: Goblins by spheroidal weathering. In *Proceedings of the 3rd Eurogr. Conf. on Natural Phenomena* (2007), pp. 7–14.
+- **[BFO\*07]** Beardall M., Farley M., Ouderkirk D., Reimschussel C., Smith J., Jones M., Egbert P.: Goblins by spheroidal weathering. In *Proceedings of the 3rd Eurogr. Conf. on Natural Phenomena* (2007), pp. 7–14.
 - **[BSS07]** Brosz J., Samavati F. F., Sousa M. C.: Terrain synthesis by-example. In *Advances in Computer Graphics and Computer Vision*. Springer, 2007, pp. 58–77.
 - **[BTHB06]** Benes B., Těšínský V., Hornyš J., Bhatia S. K.: Hydraulic erosion. *Comp. Anim. and Virt. Worlds 17*, 2 (2006), 99–108.
 - **[BW13]** Braun J., Willett S. D.: A very efficient O(n), implicit and parallel method to solve the stream power equation governing fluvial incision and landscape evolution. *Geomorphology 180* (2013), 170–179.
 - **[CB14]** Croissant T., Braun J.: Constraining the stream power law: a novel approach combining a landscape evolution model and an inversion method. In *EGU General Assembly Conference Abstracts* (2014), vol. 16, p. 10657.
 - **[CMF98]** Chiba N., Muraoka K., Fujita K.: An erosion model based on velocity fields for the visual simulation of mountain scenery. *The Journal of Visualization and Computer Animation 9* (1998), 185–194.
 - **[DEJP99]** Dorsey J., Edelman A., Jensen H. W., Pedersen H. K.: Modeling and rendering of weathered stone. In *Proceedings of SIGGRAPH ’99* (1999), vol. 25(4), ACM, pp. 225–234.
-- **[EMP*02]** Ebert D. S., Musgrave F. K., Peachey D., Perlin K., Worley S.: *Texturing and Modeling: A Procedural Approach*. Morgan Kaufmann Publishers Inc., 2002.
+- **[EMP\*02]** Ebert D. S., Musgrave F. K., Peachey D., Perlin K., Worley S.: *Texturing and Modeling: A Procedural Approach*. Morgan Kaufmann Publishers Inc., 2002.
 - **[FFC82]** Fournier A., Fussell D., Carpenter L.: Computer rendering of stochastic models. *Communications of the ACM 25*, 6 (1982), 371–384.
 - **[GDPG16]** Guérin E., Digne J., Peytavie A., Galin E.: Sparse representation of terrains for procedural modeling. *Computer Graphics Forum* (2016).
-- **[GGG*13]** Génevaux J.-D., Galin E., Guérin E., Peytavie A., Benes B.: Terrain generation using procedural models based on hydrology. *ACM Trans. Graph. 32*, 4 (2013), 143:1–143:13.
-- **[GGP*15]** Génevaux J.-D., Galin E., Peytavie A., Guérin E., Briquet C., Grosbellet F., Benes B.: Terrain modelling from feature primitives. *Computer Graphics Forum 34*, 6 (2015), 198–210.
+- **[GGG\*13]** Génevaux J.-D., Galin E., Guérin E., Peytavie A., Benes B.: Terrain generation using procedural models based on hydrology. *ACM Trans. Graph. 32*, 4 (2013), 143:1–143:13.
+- **[GGP\*15]** Génevaux J.-D., Galin E., Peytavie A., Guérin E., Briquet C., Grosbellet F., Benes B.: Terrain modelling from feature primitives. *Computer Graphics Forum 34*, 6 (2015), 198–210.
 - **[GMM15]** Gain J., Merry B., Marais P.: Parallel, realistic and controllable terrain synthesis. *Comp. Graph. Forum 34*, 2 (2015), 105–116.
 - **[GMS09]** Gain J., Marais P., Strasser W.: Terrain sketching. In *Proceedings of the I3D* (2009), ACM, pp. 31–38.
-- **[HGA*10]** Hnaidi H., Guérin E., Akkouche S., Peytavie A., Galin E.: Feature based terrain generation using diffusion equation. *Comp. Graph. Forum 29*, 7 (2010), 2179–2186.
+- **[HGA\*10]** Hnaidi H., Guérin E., Akkouche S., Peytavie A., Galin E.: Feature based terrain generation using diffusion equation. *Comp. Graph. Forum 29*, 7 (2010), 2179–2186.
 - **[How82]** Howard A. D.: Equilibrium and time scales in geomorphology: Application to sand-bed alluvial streams. *Earth Surface Processes and Landforms 7*, 4 (1982), 303–325.
 - **[How94]** Howard A. D.: A detachment-limited model of drainage basin evolution. *Water Resources Research 30*, 7 (1994), 2261–2285.
 - **[Hv11]** Hudák M., Ďurikovič R.: Terrain Models for Mass Movement Erosion. In *Theory and Practice of Computer Graphics* (2011).
@@ -566,12 +566,12 @@ It would be interesting to exploit parallel implementation and one option would 
 - **[MDH07]** Mei X., Decaudin P., Hu B.-G.: Fast hydraulic erosion simulation and visualization on GPU. In *Pacific Graphics* (2007), vol. 0, IEEE Computer Society, pp. 47–56.
 - **[MKM89]** Musgrave F. K., Kolb C. E., Mace R. S.: The synthesis and rendering of eroded fractal terrains. *ACM SIGGRAPH Computer Graphics 23*, 3 (1989), 41–50.
 - **[MVN68]** Mandelbrot B. B., Van Ness J. W.: Fractional Brownian motions, fractional noises and applications. *SIAM Review 10*, 4 (1968), 422–437.
-- **[NLP*13]** Natali M., Lidal E., Parulek J., Viola I., Patel D.: Modeling terrains and subsurface geology. *Proc. of Eurogr. State of the Art Reports* (2013), 155–173.
+- **[NLP\*13]** Natali M., Lidal E., Parulek J., Viola I., Patel D.: Modeling terrains and subsurface geology. *Proc. of Eurogr. State of the Art Reports* (2013), 155–173.
 - **[NWD05]** Neidhold B., Wacker M., Deussen O.: Interactive Physically Based Fluid and Erosion Simulation. In *Eurographics Workshop on Natural Phenomena* (2005), Poulin P., Galin E., (Eds.), The Eurographics Association, pp. 25–33.
 - **[PGGM09]** Peytavie A., Galin E., Grosjean J., Mérillou S.: Arches: a framework for modeling complex terrains. *Comp. Graph. Forum 28*, 2 (2009), 457–467.
 - **[SBW06]** Schneider J., Boldte T., Westermann R.: Real-time editing, synthesis, and rendering of infinite landscapes on GPUs. In *Vision, modeling, and visualization 2006: proceedings* (Aachen, Germany, 2006), IOS Press, p. 145.
 - **[STBB14]** Smelik R. M., Tutenel T., Bidarra R., Benes B.: A survey on procedural modelling for virtual worlds. *Comp. Graph. Forum 33*, 6 (2014), 31–50.
-- **[TEC*14]** Tasse F. P., Emilien A., Cani M.-P., Hahmann S., Bernhardt A.: First person sketch-based terrain editing. In *Proceedings of the Graphics Interface* (2014), Canadian Information Processing Society, pp. 217–224.
+- **[TEC\*14]** Tasse F. P., Emilien A., Cani M.-P., Hahmann S., Bernhardt A.: First person sketch-based terrain editing. In *Proceedings of the Graphics Interface* (2014), Canadian Information Processing Society, pp. 217–224.
 - **[TJ10]** Tychonievich L., Jones M.: Delaunay deformable mesh for the weathering and erosion of 3D terrain. *The Visual Computer 26*, 12 (2010), 1485–1495.
 - **[VBHS11]** Vanek J., Benes B., Herout A., Stava O.: Large-scale physics-based terrain editing using adaptive tiles on the GPU. *Comp. Graph. and App., IEEE 31*, 6 (2011), 35–44.
 - **[WBF93]** Willett S., Beaumont C., Fullsack P.: Mechanical model for the tectonics of doubly vergent compressional orogens. *Geology 21*, 4 (1993), 371–374.

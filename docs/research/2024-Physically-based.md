@@ -35,21 +35,21 @@ We propose an efficient implementation of the analytical solutions with a multig
 Terrains are ubiquitous in a large variety of graphics applications, whether they form the background of virtual worlds or the stage of many storytelling artworks.
 Mountains, in particular, stand out from their monumental presence and the diversity of their features.
 
-It is therefore unsurprising that research in computer graphics has investigated the problem of generating and authoring mountainous landscapes [GGP*19].
-Nevertheless, while several approaches work well for small to medium-scale terrains (the scale of the river to the valley) [EMP*02, BTHB06, GMM15], for larger scales up to the scale of the mountain range they lack geological consistency which is prevailing in large mountain structures.
-Consistency is achieved by approaches based on physical simulations [CCB*17] which are preeminent in this case.
+It is therefore unsurprising that research in computer graphics has investigated the problem of generating and authoring mountainous landscapes [GGP\*19].
+Nevertheless, while several approaches work well for small to medium-scale terrains (the scale of the river to the valley) [EMP\*02, BTHB06, GMM15], for larger scales up to the scale of the mountain range they lack geological consistency which is prevailing in large mountain structures.
+Consistency is achieved by approaches based on physical simulations [CCB\*17] which are preeminent in this case.
 However, physical simulations require the integration of the geological history of landscapes, leading in turn to long simulation time or numerous iterations before reaching a suitable result.
 
 Our work comes from the observation that there exist analytical solutions to the mathematical equation that expresses the formation of large-scale landscapes resulting from the competition between tectonic uplift and fluvial incision.
 Thanks to an efficient implementation of these analytical solutions, we obtain a terrain modeling tool that shares the benefits of a physical simulation, but without the cost of thousands of time-stepping iterations.
 Instead, the temporal component of the simulation becomes another parameter provided to the user, that controls the real-world duration of the erosion process.
 
-The *stream power law* is commonly used in geomorphology [WT99, BW13] and now in computer graphics [CBC*16, SPF*23] to model large-scale river erosion.
+The *stream power law* is commonly used in geomorphology [WT99, BW13] and now in computer graphics [CBC\*16, SPF\*23] to model large-scale river erosion.
 Combined with *uplift* - the tectonically-driven rate of elevation change of the mountain - this results in a Partial Differential Equation (PDE) that describes the formation of the mountain ranges over geological time.
 Early studies in Earth sciences suggest that this equation admits analytical solutions [RTP13, Ste21] that readily provide a landscape at a time $t$ (Figure 1), without requiring the lengthy iterations of a time-stepping scheme.
 However, these solutions use several simplifying assumptions, for instance, that the terrain is initially flat.
 We propose a new derivation and fast numerical implementation of these solutions for the more general case, which enables us to reach a larger range of applications, from the instantaneous generation of large-scale mountain ranges to the controllable aging of a user-provided terrain.
-Inspired by the implicit time-stepping scheme for the stream power law [BW13, CBC*16], our algorithm uses an ordering of the terrain grid cells, starting at the domain boundaries, and following the river network upstream.
+Inspired by the implicit time-stepping scheme for the stream power law [BW13, CBC\*16], our algorithm uses an ordering of the terrain grid cells, starting at the domain boundaries, and following the river network upstream.
 This strategy comes with a caveat illustrative of the challenges of porting the 1D solution to the 2D setting: elevations are computed based on an order that depends on the hydrology network, but the hydrology network itself depends on the elevations.
 Previous work [Ste21] developed a fixed-point algorithm that iterates over the successive computation of the river network and then the elevations.
 Yet, this algorithm converges slowly, requiring too many iterations to be applied in an interactive editing context and assumes flat initial topography.
@@ -65,22 +65,22 @@ To summarize, we claim the following technical contributions: 1) We extend the d
 
 ## 2. Previous Work
 
-Terrain generation methods are generally classified among three main categories: example-based (or data-based), procedural, and physically-based [GGP*19].
+Terrain generation methods are generally classified among three main categories: example-based (or data-based), procedural, and physically-based [GGP\*19].
 Our new *analytical model* - inspired by previous work in Earth sciences - is, in essence, a physically-based procedural method.
 
 **Data-driven** - or example-based - methods assemble terrains from patches or statistics extracted from the topography of real examples, typically captured by satellites.
-Initially inspired by texture synthesis [ZSTR07, GMM15] and extended to machine-learning [GDG*17], these methods are fast, controllable, and provide an unmatched realism at a small scale.
+Initially inspired by texture synthesis [ZSTR07, GMM15] and extended to machine-learning [GDG\*17], these methods are fast, controllable, and provide an unmatched realism at a small scale.
 
 However, data-driven methods are unable to ensure geological consistency.
 While this is not noticeable on a small scale, inconsistencies at a larger scale can have a critical impact for instance on the river network, where some streams can end abruptly.
 Scott *et al.* [SD21] demonstrated the negative visual impact of these inconsistencies and proposed a correction by carving a realistic river network as a post-process.
 While this approach fixes the river network, several inconsistencies in the distribution of valleys and elevation remain and reduce the realism at a large scale.
 
-**Procedural** generation [EMP*02] builds terrains from a combination of mathematical functions, especially multi-frequency noise that mimics the self-similarity of nature across scales [MVN68].
+**Procedural** generation [EMP\*02] builds terrains from a combination of mathematical functions, especially multi-frequency noise that mimics the self-similarity of nature across scales [MVN68].
 This mathematical foundation leads to methods that are extremely fast, parallel, and unbounded in size.
-These approaches are usually hard to control, although this issue has been recently alleviated, either by local editing tools such as noise brushes [dCB09], global interpolation around diffusion curves [HGA*10], or in the gradient domain [GPM*22].
+These approaches are usually hard to control, although this issue has been recently alleviated, either by local editing tools such as noise brushes [dCB09], global interpolation around diffusion curves [HGA\*10], or in the gradient domain [GPM\*22].
 It is, however, still difficult to ensure the realism and consistency of the results.
-One solution is to build the terrain around a procedural river network [GGG*13] which ensures hydrological consistency.
+One solution is to build the terrain around a procedural river network [GGG\*13] which ensures hydrological consistency.
 Thanks to our analytical solution of the physical equations, our model ensures consistency of the hydrology network and the topography, and introduces a temporal parameter.
 
 **Physically-based** methods were inspired by the geological knowledge that landscapes are shaped by the combination of various processes [WT99, WHBY22]: climate which modulates the rates of erosion, and tectonics which controls the uplift rate (the rate of vertical growth of the mountain).
@@ -91,8 +91,8 @@ Methods that simulate hydraulic erosion handle the water dynamics explicitly, wh
 To compensate, the results are scaled up, which therefore reduces the overall plausibility.
 In contrast, fluvial erosion methods implement models developed in geomorphology, for instance, the stream power law [WT99].
 These laws abstract water physics under simpler proxies, *e.g.,* the drainage area that represents water flux (or discharge), which yields simulations that can efficiently cover much larger time spans.
-Therefore, fluvial erosion allows a tight coupling with the growth of the mountain under tectonic uplift [CBC*16] to model the formation of large-scale mountain ranges.
-Uplift was also proposed as a guide for the user to shape the landscape [CCB*17, SPF*23].
+Therefore, fluvial erosion allows a tight coupling with the growth of the mountain under tectonic uplift [CBC\*16] to model the formation of large-scale mountain ranges.
+Uplift was also proposed as a guide for the user to shape the landscape [CCB\*17, SPF\*23].
 We build our analytical model upon the laws introduced by fluvial erosion methods, but our mathematical treatment removes the need for costly iterations inherent to simulations.
 
 **Earth sciences** commonly use simulations to understand the formation of mountains.
@@ -114,7 +114,7 @@ In this section, we will explain the underlying equations, show the challenges b
 ### 3.1. Landscape dynamics in geology
 
 Mountain formation is generally associated with tectonic plate convergence, mantle dynamics, and/or volcanic activity.
-In the context of tectonic convergence, the eventual collision of the plates leads to a thickening of the crust accommodated by visco-elasto-plastic deformation, brittle rupture (faults), and folding of the rock layers [Avo03, GCG*09].
+In the context of tectonic convergence, the eventual collision of the plates leads to a thickening of the crust accommodated by visco-elasto-plastic deformation, brittle rupture (faults), and folding of the rock layers [Avo03, GCG\*09].
 The thickening leads to a vertical upward motion of rocks towards the surface, referred to as *rock uplift*, which competes with erosion and can lead to a progressive increase in the surface altitude, called *surface uplift* [EM90].
 Rates of rock uplift and erosion vary in space and time and achieve values up to a few millimeters per year in some mountain ranges.
 
@@ -122,7 +122,7 @@ The uplift is counteracted by erosion, which impacts the slopes of the mountain 
 Erosion comes from many factors: water, glaciers, landslides, wind, and even anthropic or biological impact.
 Many models in geomorphology consider only erosion by water, also called *fluvial* erosion.
 Indeed, the fluvial network is considered the backbone of landscapes, and fluvial incision dictates the rate of landscape erosion [Whi04].
-While simple to model, fluvial erosion explains the main topographical characteristics of most mountain ranges and has been the dominant erosion factor over many geological periods - with the notable exception of the last million years, where the Quaternary saw an important increase in glacial erosion that leaves specific marks in high altitude [PMD01, ENPL09, SHV*12].
+While simple to model, fluvial erosion explains the main topographical characteristics of most mountain ranges and has been the dominant erosion factor over many geological periods - with the notable exception of the last million years, where the Quaternary saw an important increase in glacial erosion that leaves specific marks in high altitude [PMD01, ENPL09, SHV\*12].
 
 A first common modeling approximation is to consider surface evolution as a detachment-limited process (as opposed to transport-limited) where the evolution of surface elevation $z$ is directly related to the competition between rock uplift and erosion rate, and not to the capacity of the rivers to transport or deposit sediments [How94].
 In this setting, erosion is generally described using the stream power incision model [HK83, How94, WT99, Lag14], where erosion rate is a power law of the surface slope $\|\nabla z\|$, and drainage area $A$ that acts as a proxy for the river discharge.
@@ -163,7 +163,7 @@ In Section 4, we detail our first contribution which is the derivation and imple
 We follow [Ste21] and order the computation along the river network.
 This network consists of a set of trees that covers the terrain and represents the progressive merging of high-altitude small streams down to the larger rivers.
 We obtain the 2D analytical solution by solving the 1D problem on each upstream path embedded in the tree structures.
-Similarly to the previous implicit time stepping schemes for the Stream Power Law [BW13, CBC*16], we separate the computation into two parts: first we accumulate the drainage area by following the river directions from the high elevations (ridges) of the terrain to the bounds, then we evaluate the analytical solution upstream from the bounds to the ridges.
+Similarly to the previous implicit time stepping schemes for the Stream Power Law [BW13, CBC\*16], we separate the computation into two parts: first we accumulate the drainage area by following the river directions from the high elevations (ridges) of the terrain to the bounds, then we evaluate the analytical solution upstream from the bounds to the ridges.
 
 This strategy leads to a second issue that hinders the optimal complexity of our algorithm on a stream tree: the elevations obtained from the implicit solution depend on the ordering of the nodes in the river network, which itself depends on the elevations.
 In practice, this leads to the formation of discontinuities at the boundaries of drainage basins.
@@ -219,7 +219,7 @@ $$
 where $a(s) = k A(s)^m$.
 Note that we assume that $A$ does not depend on time – we observed that, after some time, the drainage $A$ stabilizes in the main river channels.
 A solution of Eqn. 3 was proposed in Earth sciences [Ste21] with the assumption that $u$ is constant in space and varies in time, which is important for geomorphologists who study the erosional response to tectonic perturbations.
-We prefer an orthogonal approach where the uplift varies in space but not in time, as we expect the uplift to be easier to control for the user as a function of space alone [SPF*23].
+We prefer an orthogonal approach where the uplift varies in space but not in time, as we expect the uplift to be easier to control for the user as a function of space alone [SPF\*23].
 
 We use the following assumptions at the bound:
 
@@ -387,11 +387,11 @@ We now show that our algorithm for the 1D solution of the analytical equation re
 We explained in Section 4.1 that the analytical solutions are computed along a 1D *river path*, that follows the steepest path on the terrain.
 In practice, rivers merge into an algorithmic tree structure, that we call a *river tree*, and we call the set of all river trees the *river network* or *hydrology network*.
 On a river tree, each node has a single downstream neighbor, on which we can apply directly the recursive formulations from Section 4.2.
-In practice, this requires ordering the computation so that it follows the nodes of the tree, which is suggested by the literature on implicit solutions to the stream power law [BW13, CBC*16] or previous attempts toward analytical solutions in the geology literature [Ste21].
+In practice, this requires ordering the computation so that it follows the nodes of the tree, which is suggested by the literature on implicit solutions to the stream power law [BW13, CBC\*16] or previous attempts toward analytical solutions in the geology literature [Ste21].
 
 The ordering is (weakly) defined by assigning to each cell $c$ of the terrain a receiver $c_r$, which is one of the four direct neighbors to the cell, and whose elevation is strictly lower than the cell.
 In our case, we choose the receiver randomly, with a probability proportional to the difference in elevation between the cell and its lower neighbors.
-We prefer a random sampling over the deterministic choice of the lowest neighbor [BW13, CBC*16] that was designed for irregular grids and yields the formation of uniform axis-aligned valleys on regular grids (Figure 8).
+We prefer a random sampling over the deterministic choice of the lowest neighbor [BW13, CBC\*16] that was designed for irregular grids and yields the formation of uniform axis-aligned valleys on regular grids (Figure 8).
 Furthermore, the noise induced by the randomization results in more naturally diverse patterns.
 To ensure the deterministic behavior of our algorithm, we precompute and store the random variable used by each cell to sample the receiver.
 
@@ -401,7 +401,7 @@ The inset figure below shows the river network for a $32 \times 32$ terrain, dif
 ![Inset (page 8): river network of a 32 × 32 terrain](2024-Physically-based/inset-p08-river-network.jpg)
 
 We parse this tree in two directions: first, we accumulate the area of the cells $\delta x^2$ from the leaves to the root to compute the drainage area $A$.
-Here, a topological sort on the tree guarantees the correctness of the computation of $A$ from the invariant that any cell is evaluated after all upstream cells [BW13, CBC*16, Ste21].
+Here, a topological sort on the tree guarantees the correctness of the computation of $A$ from the invariant that any cell is evaluated after all upstream cells [BW13, CBC\*16, Ste21].
 
 Then, we parse the tree in the other direction, from the root (bound) to the leaves, to evaluate the analytical solution.
 The 1D recursive algorithm (Section 4.2) translates directly to that case: each cell at position $x$ has a single receiver that plays the role of the cell at $x - \delta x$ in the recursive formula (Eqns. 15, 18).
@@ -409,7 +409,7 @@ The main issue, which distinguishes us from previous work, is that our algorithm
 We tackle this issue by using another ordering for this step: with a depth-first search, we can record the sequence of cells between the bound and the current cell, and use this sequence to evaluate the integrals involving $D_{x,t}$ in Eqns. 15 and 18.
 
 Strategies based on ordering share a common pitfall when local minima are present on the terrain – and analytical solutions in particular are not well defined for that case.
-Following previous work [BW13, CBC*16], we rely on a depression carving algorithm [SD21] to reroute some of the cells as if breaches were carved in the terrain to allow for the water to flow out of all local minima.
+Following previous work [BW13, CBC\*16], we rely on a depression carving algorithm [SD21] to reroute some of the cells as if breaches were carved in the terrain to allow for the water to flow out of all local minima.
 
 The choice of a single receiver results in an incorrect evaluation of the slope of the terrain (as $\|\nabla z\|$ requires the spatial derivative from both the $x$ and $y$ directions).
 We compensate for this approximation by introducing a correction term: for a cell at position $x$ with a receiver at position $x_r$, we change $a(x)$ to $a(x) = k A^m \frac{\delta x \|\nabla z\|}{z(x) - z(x_r)}$.
@@ -458,7 +458,7 @@ If artifacts remain, they are generally solved by adding more iterations, but we
 ### 5.3. Optimization-based altitude correction
 
 Our multigrid algorithm efficiently updates the river network to remove the discontinuities but is not applicable in all situations.
-For instance, a user might want to preserve the original drainage or use a procedurally generated river network [GGG*13, GBG*19].
+For instance, a user might want to preserve the original drainage or use a procedurally generated river network [GGG\*13, GBG\*19].
 For these cases, we assume that the river network is given and fixed, and we find the minimal correction to the analytical solution that removes the discontinuities.
 Figure 4 shows the discontinuities seen after applying the analytical solutions directly to the initial river network (left), and how the discontinuities were removed by our optimization method (right).
 
@@ -528,7 +528,7 @@ We explore two possible predominant processes: hillslope erosion and landslides,
 ### 6.1. Hillslope erosion
 
 Hillslope processes encompass the weathering of the mountain slopes and the diffusion that results from the creep flow of the eroded material.
-It is often simplified as a linear diffusion of the terrain elevation [BS97, SPF*23, CJP*23]:
+It is often simplified as a linear diffusion of the terrain elevation [BS97, SPF\*23, CJP\*23]:
 
 $$
 \frac{\partial z}{\partial t} = k_h \Delta z,
@@ -627,7 +627,7 @@ The code, Houdini file, and heightfields are available at https://gitlab.inria.f
 ### 7.1. Validation and comparison
 
 **Analytical solutions and simulation.** The purpose of our algorithm based on analytical solutions is to quickly generate terrains that are similar to the results of a simulation of the stream power law.
-In Figure 5, we compare between our method (with multigrid, top left), a simulation [CBC*16] (top right), and previous work in geology [Ste21] (Fixed point iteration, bottom left).
+In Figure 5, we compare between our method (with multigrid, top left), a simulation [CBC\*16] (top right), and previous work in geology [Ste21] (Fixed point iteration, bottom left).
 The comparison is performed at steady-state ($t = 4.6\,My$) as the last method does not handle initial topography and, also, in order to limit the integration error of the simulation.
 In this example, we use a constant uplift modulated by a subtle noise on a $512 \times 512$ terrain with $\delta x = 50\,m$.
 In the simulation, we use 460 iterations with $dt = 10000$, which we found to be the maximal time-step that did not produce visible artifacts.
@@ -635,7 +635,7 @@ The fixed-point algorithm required 43 iterations to converge.
 
 ![Figure 5](2024-Physically-based/figure-05.jpg)
 
-**Figure 5:** We compare our method at steady state (with multigrid, top left) with a simulation [CBC*16] (top right) and a fixed point algorithm [Ste21] (bottom left).
+**Figure 5:** We compare our method at steady state (with multigrid, top left) with a simulation [CBC\*16] (top right) and a fixed point algorithm [Ste21] (bottom left).
 These three methods should produce similar results, which we highlight by comparing their hypsometry (or the density plot of the elevations, bottom right).
 
 The strength of analytical solutions is that they do not need to explicitly model the intermediate time states of the terrain, but this means that the river network at convergence is one of the many possible networks that agree with the stream power law.
@@ -659,28 +659,28 @@ Overall, we did not observe significant changes in performance with other erosio
 **Table 2:** Time required to compute a terrain at various resolutions, for our method with multigrid, the fixed point iteration, and the simulation.
 We also show the total time required to correct the discontinuities with our optimization algorithm in the worst case (the elevations are adjusted to the initial river network).
 
-**GPU simulations** of the stream power law [SPF*23] might in some cases be faster than our method even though they require many iterations.
+**GPU simulations** of the stream power law [SPF\*23] might in some cases be faster than our method even though they require many iterations.
 There are, however, caveats inherent to the GPU architecture that prevent them from being used in all cases.
 First, GPU simulations use an explicit time-stepping scheme, which bounds the admissible time step and can yield a prohibitive number of iterations for small $\delta x$.
 Second, depressions in the topography lead to local minima that interrupt the river network.
-Similarly to other CPU algorithms, we use depression breaching [CBC*16, SD21] to enforce the continuity of the river across the depressions.
+Similarly to other CPU algorithms, we use depression breaching [CBC\*16, SD21] to enforce the continuity of the river across the depressions.
 The absence of such an algorithm on GPU implementations is particularly visible in cases where we erode without uplift – all the water is trapped within the depressions and the erosion only occurs in the vicinity of the topographic gradients.
 We illustrate this problem in the inset figure, where we use a simulation without depression filling to erode an escarpment for $500\,ky$.
 While the result should be similar to Figure 12 (right), the erosion remained local to the initial cliff and did not expand toward wide canyons.
 
 ![Inset (page 11): simulation without depression carving](2024-Physically-based/inset-p11-no-depression-carving.jpg)
 
-**Hydrology-based and physically-based.** Many procedural methods targeted the instant generation of terrains, often through the use of noise functions [EMP*02].
-Closer to us, Génevaux *et al.* [GGG*13] proposed a procedural approach based on hydrology.
+**Hydrology-based and physically-based.** Many procedural methods targeted the instant generation of terrains, often through the use of noise functions [EMP\*02].
+Closer to us, Génevaux *et al.* [GGG\*13] proposed a procedural approach based on hydrology.
 They generate a river network whose formation and elevation is guided by a slope map.
 The elevation of areas between rivers is computed using a second slope map.
-Since our method, similarly, computes the elevations progressively in the order defined by the river network, we alter the $a(s)$ term of Eqn. 3 so as to enforce a small slope for main rivers ($\|\nabla z\| = 0.06$ if the drainage is above $2500\,m^3 y^{-1}$), and a stronger slope for the sides of the mountain ($\|\nabla z\| = 0.6$), corresponding to the two slope maps of [GGG*13].
+Since our method, similarly, computes the elevations progressively in the order defined by the river network, we alter the $a(s)$ term of Eqn. 3 so as to enforce a small slope for main rivers ($\|\nabla z\| = 0.06$ if the drainage is above $2500\,m^3 y^{-1}$), and a stronger slope for the sides of the mountain ($\|\nabla z\| = 0.6$), corresponding to the two slope maps of [GGG\*13].
 In Figure 6, we compare our method (right) with this hydrology-based approach.
-While the latter convincingly arranges rivers and surrounding mountains, our physically-based solutions yield more diverse patterns at all scales, self-emerging from the combination of uplift, stream power law, and hillslope [CMA*16].
+While the latter convincingly arranges rivers and surrounding mountains, our physically-based solutions yield more diverse patterns at all scales, self-emerging from the combination of uplift, stream power law, and hillslope [CMA\*16].
 
 ![Figure 6](2024-Physically-based/figure-06.jpg)
 
-**Figure 6:** Comparison between a hydrology-based approach based on [GGG*13] (left) and our analytical solution (right).
+**Figure 6:** Comparison between a hydrology-based approach based on [GGG\*13] (left) and our analytical solution (right).
 While the hydrology-based approach preserves the river consistency, our physically-based analytical solutions produce more diverse multi-scale features.
 
 ![Figure 7](2024-Physically-based/figure-07.jpg)
@@ -737,7 +737,7 @@ We notice that the erosion time affects both the depth and the shape of the eros
 
 **Uplift** emerges from tectonic activity and is responsible for the formation of mountain ranges.
 It is therefore used as another tool to control the generation of large-scale landscapes.
-In Figure 7, we show that the different uplift-based controls developed in previous work [CCB*17, SPF*23] readily extend to our method.
+In Figure 7, we show that the different uplift-based controls developed in previous work [CCB\*17, SPF\*23] readily extend to our method.
 These methods use various strategies to fill an uplift map, and provide this map as input to a simulation of the stream power law.
 We use a user-painted uplift map (Figure 7, left), which could alternatively be generated by one of the aforementioned methods, and show how the map controls the formation of the $4.6\,My$ old mountain at different scales (from left to right a $5\,km$, $15\,km$, and $25\,km$ large mountain).
 We notice in particular that variations in the uplift map mainly dictate the trajectory of the main rivers at smaller scales, and also influence the local ridge-line elevations for larger ranges.
@@ -785,7 +785,7 @@ Instead, the time becomes another parameter that the user can explore without an
 We proposed a derivation and implementation of these analytical solutions adapted to computer graphics applications, allowing the user to specify both an initial terrain to be eroded and an uplift map to control the emergence of a mountain range and explore any intermediate possibility.
 To the challenge of generating a terrain physically consistent with its river network, we propose two solutions that yield interactive performances: an accurate multigrid acceleration, and an optimization-based approach that preserves the initial river network.
 Eventually, we introduced new models for hillslope and thermal erosion that are easily integrable in our implementation.
-Our main limitation is the lack of time consistency at large time $t$, which motivates future work on a more conservative hydrology-based multigrid scheme, or alternative solutions where analytical solutions would control the procedural generation of river networks [GBG*19].
+Our main limitation is the lack of time consistency at large time $t$, which motivates future work on a more conservative hydrology-based multigrid scheme, or alternative solutions where analytical solutions would control the procedural generation of river networks [GBG\*19].
 
 ## Acknowledgements
 
@@ -831,25 +831,25 @@ $$
 - **[BS97]** Braun J., Sambridge M.: Modelling landscape evolution on geological time scales: a new method based on irregular spatial discretization. *Basin Research 9*, 1 (1997), 27–52.
 - **[BTHB06]** Benes B., Těšínský V., Hornyš J., Bhatia S. K.: Hydraulic erosion. *Computer Animation and Virtual Worlds 17*, 2 (2006), 99–108.
 - **[BW13]** Braun J., Willett S. D.: A very efficient o(n), implicit and parallel method to solve the stream power equation governing fluvial incision and landscape evolution. *Geomorphology 180-181* (2013), 170–179.
-- **[CBC*16]** Cordonnier G., Braun J., Cani M.-P., Benes B., Galin E., Peytavie A., Guérin E.: Large Scale Terrain Generation from Tectonic Uplift and Fluvial Erosion. *Computer Graphics Forum 35*, 2 (May 2016), 165–175.
-- **[CCB*17]** Cordonnier G., Cani M.-P., Benes B., Braun J., Galin E.: Sculpting mountains: Interactive terrain modeling based on subsurface geology. *IEEE Transactions on Visualization and Computer Graphics 24*, 5 (2017), 1756 – 1769.
+- **[CBC\*16]** Cordonnier G., Braun J., Cani M.-P., Benes B., Galin E., Peytavie A., Guérin E.: Large Scale Terrain Generation from Tectonic Uplift and Fluvial Erosion. *Computer Graphics Forum 35*, 2 (May 2016), 165–175.
+- **[CCB\*17]** Cordonnier G., Cani M.-P., Benes B., Braun J., Galin E.: Sculpting mountains: Interactive terrain modeling based on subsurface geology. *IEEE Transactions on Visualization and Computer Graphics 24*, 5 (2017), 1756 – 1769.
 - **[CDM14]** Chen A., Darbon J., Morel J.-M.: Landscape evolution models: A review of their fundamental equations. *Geomorphology 219* (2014), 68–86.
-- **[CJP*23]** Cordonnier G., Jouvet G., Peytavie A., Braun J., Cani M.-P., Benes B., Galin E., Guérin E., Gain J.: Forming terrains by glacial erosion. *ACM Transactions on Graphics 42*, 4 (2023).
-- **[CMA*16]** Clubb F. J., Mudd S. M., Attal M., Milodowski D. T., Grieve S. W.: The relationship between drainage density, erosion rate, and hilltop curvature: Implications for sediment transport processes. *Journal of Geophysical Research: Earth Surface 121*, 10 (2016), 1724–1745. \_eprint: https://agupubs.onlinelibrary.wiley.com/doi/pdf/10.1002/2015JF003747.
+- **[CJP\*23]** Cordonnier G., Jouvet G., Peytavie A., Braun J., Cani M.-P., Benes B., Galin E., Guérin E., Gain J.: Forming terrains by glacial erosion. *ACM Transactions on Graphics 42*, 4 (2023).
+- **[CMA\*16]** Clubb F. J., Mudd S. M., Attal M., Milodowski D. T., Grieve S. W.: The relationship between drainage density, erosion rate, and hilltop curvature: Implications for sediment transport processes. *Journal of Geophysical Research: Earth Surface 121*, 10 (2016), 1724–1745. \_eprint: https://agupubs.onlinelibrary.wiley.com/doi/pdf/10.1002/2015JF003747.
 - **[dCB09]** de Carpentier G. J., Bidarra R.: Interactive gpu-based procedural heightfield brushes. In *Proceedings of the 4th International Conference on Foundations of Digital Games* (New York, NY, USA, 2009), Association for Computing Machinery, pp. 55–62.
 - **[EM90]** England P., Molnar P.: Surface uplift, uplift of rocks, and exhumation of rocks. *Geology 18*, 12 (12 1990), 1173–1177.
-- **[EMP*02]** Ebert D. S., Musgrave F. K., Peachey D., Perlin K., Worley S.: *Texturing and Modeling: A Procedural Approach*. Morgan Kaufmann Publishers Inc., 2002.
+- **[EMP\*02]** Ebert D. S., Musgrave F. K., Peachey D., Perlin K., Worley S.: *Texturing and Modeling: A Procedural Approach*. Morgan Kaufmann Publishers Inc., 2002.
 - **[ENPL09]** Egholm D. L., Nielsen S. B., Pedersen V. K., Lesemann J.-E.: Glacial effects limiting mountain height. *Nature 460*, 7257 (2009), 884–887.
-- **[GBG*19]** Gaillard M., Benes B., Guérin E., Galin E., Rohmer D., Cani M.-P.: Dendry: A procedural model for dendritic patterns. In *Proceedings of the ACM SIGGRAPH Symposium on Interactive 3D Graphics and Games* (2019), pp. 1–9.
-- **[GCG*09]** Gapais D., Cagnard F., Gueydan F., Barbey P., Ballèvre M.: Mountain building and exhumation processes through time: inferences from nature and models. *Terra Nova 21*, 3 (2009), 188–194.
-- **[GDG*17]** Guérin E., Digne J., Galin E., Peytavie A., Wolf C., Benes B., Martinez B.: Interactive example-based terrain authoring with conditional generative adversarial networks. *ACM Transactions on Graphics 36*, 6 (Nov. 2017), 228:1–228:13.
-- **[GGG*13]** Génevaux J.-D., Galin E., Guérin E., Peytavie A., Benes B.: Terrain generation using procedural models based on hydrology. *ACM Trans. Graph. 32*, 4 (jul 2013).
-- **[GGP*19]** Galin E., Guérin E., Peytavie A., Cordonnier G., Cani M.-P., Benes B., Gain J.: A Review of Digital Terrain Modeling. *Computer Graphics Forum 38*, 2 (2019), 553–577.
+- **[GBG\*19]** Gaillard M., Benes B., Guérin E., Galin E., Rohmer D., Cani M.-P.: Dendry: A procedural model for dendritic patterns. In *Proceedings of the ACM SIGGRAPH Symposium on Interactive 3D Graphics and Games* (2019), pp. 1–9.
+- **[GCG\*09]** Gapais D., Cagnard F., Gueydan F., Barbey P., Ballèvre M.: Mountain building and exhumation processes through time: inferences from nature and models. *Terra Nova 21*, 3 (2009), 188–194.
+- **[GDG\*17]** Guérin E., Digne J., Galin E., Peytavie A., Wolf C., Benes B., Martinez B.: Interactive example-based terrain authoring with conditional generative adversarial networks. *ACM Transactions on Graphics 36*, 6 (Nov. 2017), 228:1–228:13.
+- **[GGG\*13]** Génevaux J.-D., Galin E., Guérin E., Peytavie A., Benes B.: Terrain generation using procedural models based on hydrology. *ACM Trans. Graph. 32*, 4 (jul 2013).
+- **[GGP\*19]** Galin E., Guérin E., Peytavie A., Cordonnier G., Cani M.-P., Benes B., Gain J.: A Review of Digital Terrain Modeling. *Computer Graphics Forum 38*, 2 (2019), 553–577.
 - **[GMM15]** Gain J., Merry B., Marais P.: Parallel, realistic and controllable terrain synthesis. *Computer Graphics Forum 34*, 2 (2015), 105–116.
-- **[GPM*22]** Guérin E., Peytavie A., Masnou S., Digne J., Sauvage B., Gain J., Galin E.: Gradient terrain authoring. *Computer Graphics Forum 41*, 2 (2022), 85–95.
+- **[GPM\*22]** Guérin E., Peytavie A., Masnou S., Digne J., Sauvage B., Gain J., Galin E.: Gradient terrain authoring. *Computer Graphics Forum 41*, 2 (2022), 85–95.
 - **[GWHB14]** Goren L., Willett S. D., Herman F., Braun J.: Coupled numerical–analytical approach to landscape evolution modeling. *Earth Surface Processes and Landforms 39*, 4 (2014), 522–545.
 - **[Hac57]** Hack J. T.: *Studies of longitudinal stream profiles in Virginia and Maryland*, vol. 294. US Government Printing Office, 1957.
-- **[HGA*10]** Hnaidi H., Guérin É., Akkouche S., Peytavie A., Galin É.: Feature based terrain generation using diffusion equation. *Computer Graphics Forum 29*, 7 (2010), 2179–2186.
+- **[HGA\*10]** Hnaidi H., Guérin É., Akkouche S., Peytavie A., Galin É.: Feature based terrain generation using diffusion equation. *Computer Graphics Forum 29*, 7 (2010), 2179–2186.
 - **[HK83]** Howard A. D., Kerby G.: Channel changes in badlands. *GSA Bulletin 94*, 6 (06 1983), 739–752.
 - **[How94]** Howard A. D.: A detachment-limited model of drainage basin evolution. *Water resources research 30*, 7 (1994), 2261–2285.
 - **[KBKv09]** Krištof P., Benes B., Křivánek J., Šťava O.: Hydraulic erosion using smoothed particle hydrodynamics. *Computer Graphics Forum (Proceedings of Eurographics 2009) 28*, 2 (mar 2009), 219–228.
@@ -863,10 +863,10 @@ $$
 - **[RPP93]** Roudier P., Peroche B., Perrin M.: Landscapes synthesis achieved through erosion and deposition process simulation. *Computer Graphics Forum 12*, 3 (1993), 375–383.
 - **[RTP13]** Royden L., Taylor Perron J.: Solutions of the stream power equation and application to the evolution of river longitudinal profiles. *Journal of Geophysical Research: Earth Surface 118*, 2 (2013), 497–518.
 - **[SD21]** Scott J. J., Dodgson N. A.: Example-based terrain synthesis with pit removal. *Computers & Graphics 99* (2021), 43–53.
-- **[SHV*12]** Steer P., Huismans R. S., Valla P. G., Gac S., Herman F.: Bimodal plio–quaternary glacial erosion of fjords and low-relief surfaces in scandinavia. *Nature Geoscience 5*, 9 (2012), 635–639.
+- **[SHV\*12]** Steer P., Huismans R. S., Valla P. G., Gac S., Herman F.: Bimodal plio–quaternary glacial erosion of fjords and low-relief surfaces in scandinavia. *Nature Geoscience 5*, 9 (2012), 635–639.
 - **[Sid23]** SideFX: Houdini, 2023.
 - **[Sof23]** Software P.: Terragen, 2023.
-- **[SPF*23]** Schott H., Paris A., Fournier L., Guérin E., Galin E.: Large-scale terrain authoring through interactive erosion simulation. *ACM Transactions on Graphics 42* (2023).
+- **[SPF\*23]** Schott H., Paris A., Fournier L., Guérin E., Galin E.: Large-scale terrain authoring through interactive erosion simulation. *ACM Transactions on Graphics 42* (2023).
 - **[SS20]** Schwanghart W., Scherler D.: Divide mobility controls knickpoint migration on the Roan Plateau (Colorado, USA). *Geology 48*, 7 (04 2020), 698–702.
 - **[Ste21]** Steer P.: Short communication: Analytical models for 2d landscape evolution. *Earth Surface Dynamics 9* (09 2021), 1239–1250.
 - **[Str52]** Strahler A. N.: Hypsometric (area-altitude) analysis of erosional topography. *Geological society of America bulletin 63*, 11 (1952), 1117–1142.
