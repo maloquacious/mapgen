@@ -12,6 +12,7 @@ import (
 	"github.com/maloquacious/mapgen/internal/continent"
 	"github.com/maloquacious/mapgen/internal/prng"
 	"github.com/maloquacious/mapgen/internal/structure"
+	"github.com/maloquacious/mapgen/internal/trench"
 )
 
 // The regional surface pulls the foundation toward each feature's regional
@@ -129,9 +130,13 @@ type plan struct {
 	// from s = 0 to its length. Area features: one value each.
 	step             float64
 	regional, relief []float64
+	reliefRange      [2]float64
 	// Faults: the offset, and whether the left side is downthrown.
 	offset   float64
 	downLeft bool
+	// rng is the feature's stream after these draws; belt components
+	// continue it.
+	rng *rand.Rand
 }
 
 // newPlan draws a feature's values from its terrain stream. The order of
@@ -141,7 +146,7 @@ type plan struct {
 // draws its regional and relief values.
 func newPlan(seed uint64, p RegionalParams, dom structure.Domain, f *structure.Feature) (*plan, error) {
 	rng := prng.New(seed, DomainFeature, *f.Key)
-	pl := &plan{f: f}
+	pl := &plan{f: f, rng: rng}
 	if f.Linear() {
 		pl.line = structure.NewLine(dom, f.Backbone)
 	} else {
@@ -160,6 +165,7 @@ func newPlan(seed uint64, p RegionalParams, dom structure.Domain, f *structure.F
 	if err != nil {
 		return nil, err
 	}
+	pl.reliefRange = tr.ReliefM
 	draw := func(rng *rand.Rand) {
 		pl.regional = append(pl.regional, lerp(tr.RegionalElevationM, rng.Float64()))
 		pl.relief = append(pl.relief, lerp(tr.ReliefM, rng.Float64()))
@@ -214,25 +220,43 @@ type FeatureDiagnostics struct {
 	Core      Stats       `json:"core"`
 }
 
-// regional builds the regional surface over the foundation f. Every per-cell
-// result depends only on that cell, and features are visited in order, so
-// the result does not depend on how the work is divided.
-func regional(ctx context.Context, seed uint64, p RegionalParams, g continent.Grid, ff *structure.FeatureFile, f []float32) ([]float32, []FeatureDiagnostics, error) {
+// synthesis is what feature synthesis produces.
+type synthesis struct {
+	elevation []float32
+	features  []FeatureDiagnostics
+	ridges    *RidgeFile
+	trenches  []TrenchDiagnostics
+}
+
+// regional builds the surface over the foundation f: the regional surface,
+// and, when bp is not nil, belt components, volcanic peaks, and the
+// depressions of the trenches in tf, which never lower provisional land.
+// Every per-cell result depends only on that cell, and features are
+// visited in order, so the result does not depend on how the work is
+// divided.
+func regional(ctx context.Context, seed uint64, p RegionalParams, bp *BeltParams, g continent.Grid, ff *structure.FeatureFile, tf *trench.TrenchFile, land []byte, f []float32) (*synthesis, error) {
 	dom := ff.Domain
 	cols, rows := g.Columns, g.Rows
 	plans := make([]*plan, len(ff.Features))
 	for i := range ff.Features {
 		var err error
 		if plans[i], err = newPlan(seed, p, dom, &ff.Features[i]); err != nil {
-			return nil, nil, fmt.Errorf("feature %d: %w", ff.Features[i].ID, err)
+			return nil, fmt.Errorf("feature %d: %w", ff.Features[i].ID, err)
+		}
+	}
+	var comp *components
+	if bp != nil {
+		var err error
+		if comp, err = buildComponents(*bp, dom, plans); err != nil {
+			return nil, err
 		}
 	}
 	n := len(f)
 	cores := make([][]int32, len(plans))
 	// Linear features visit the cells their envelope reaches; area features
 	// the cells whose centers lie in their outline's box.
-	eachLine := func(pl *plan, fn func(cell int, u, s float64)) error {
-		return structure.LineCells(ctx, dom, cols, rows, pl.f.Backbone, 1, func(cell int, u, s float64) {
+	eachLine := func(bb []structure.Sample, fn func(cell int, u, s float64)) error {
+		return structure.LineCells(ctx, dom, cols, rows, bb, 1, func(cell int, u, s float64) {
 			if u < 1 {
 				fn(cell, u, s)
 			}
@@ -246,11 +270,13 @@ func regional(ctx context.Context, seed uint64, p RegionalParams, g continent.Gr
 		})
 		return ctx.Err()
 	}
+	centerOf := func(cell int) structure.Point {
+		return structure.Point{X: (float64(cell%cols) + 0.5) * g.CellWidthKM, Y: (float64(cell/cols) + 0.5) * g.CellHeightKM}
+	}
 	// downside reports whether a cell lies on a normal fault's downthrown
 	// side. A cell on the line counts as the upthrown side.
 	downside := func(pl *plan, cell int) bool {
-		pt := structure.Point{X: (float64(cell%cols) + 0.5) * g.CellWidthKM, Y: (float64(cell/cols) + 0.5) * g.CellHeightKM}
-		_, _, side := pl.line.Nearest(pt)
+		_, _, side := pl.line.Nearest(centerOf(cell))
 		return side == structure.Left && pl.downLeft || side == structure.Right && !pl.downLeft
 	}
 	core := func(k int, cell int, w float64) {
@@ -271,16 +297,17 @@ func regional(ctx context.Context, seed uint64, p RegionalParams, g continent.Gr
 	}
 	for k, pl := range plans {
 		var err error
+		bb := pl.f.Backbone
 		switch ft := pl.f.Type; {
 		case ft == structure.TypeMountainBelt || ft == structure.TypeIslandArc:
-			err = eachLine(pl, func(cell int, u, s float64) {
+			err = eachLine(bb, func(cell int, u, s float64) {
 				w := kernel(u)
 				uplift(cell, w*max(0, pl.at(pl.regional, s)-float64(f[cell])))
 				core(k, cell, w)
 			})
 		case ft == structure.TypeRift:
 			a := *pl.f.AxisFraction
-			err = eachLine(pl, func(cell int, u, s float64) {
+			err = eachLine(bb, func(cell int, u, s float64) {
 				w := kernel(max(0, u-a) / (1 - a))
 				uplift(cell, w*max(0, pl.at(pl.regional, s)-float64(f[cell])))
 				if u >= a {
@@ -293,13 +320,13 @@ func regional(ctx context.Context, seed uint64, p RegionalParams, g continent.Gr
 				core(k, cell, w)
 			})
 		case ft == structure.TypeFault && pl.f.Sense == "thrust":
-			err = eachLine(pl, func(cell int, u, _ float64) {
+			err = eachLine(bb, func(cell int, u, _ float64) {
 				w := kernel(u)
 				uplift(cell, w*pl.offset)
 				core(k, cell, w)
 			})
 		case ft == structure.TypeFault && pl.f.Sense == "normal":
-			err = eachLine(pl, func(cell int, u, _ float64) {
+			err = eachLine(bb, func(cell int, u, _ float64) {
 				w := kernel(u)
 				if !downside(pl, cell) {
 					uplift(cell, w*pl.offset/2)
@@ -308,7 +335,7 @@ func regional(ctx context.Context, seed uint64, p RegionalParams, g continent.Gr
 			})
 		}
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	}
 	// The uplifted surface takes up1's place, and the depressions up2's.
@@ -319,64 +346,112 @@ func regional(ctx context.Context, seed uint64, p RegionalParams, g continent.Gr
 	}
 
 	// Depressions: the largest at each cell, measured from the uplifted
-	// surface.
+	// surface. basin records the largest basin weight, in 255ths, so belt
+	// components fade out over basins.
+	var basin []uint8
+	if comp != nil {
+		basin = make([]uint8, n)
+	}
 	deepen := func(cell int, v float64) { dep[cell] = max(dep[cell], float32(v)) }
 	for k, pl := range plans {
 		var err error
+		bb := pl.f.Backbone
 		switch ft := pl.f.Type; {
 		case ft == structure.TypeBasin:
 			err = eachArea(pl, func(cell int, w float64) {
 				deepen(cell, w*max(0, float64(out[cell])-pl.regional[0]))
 				core(k, cell, w)
+				if basin != nil {
+					basin[cell] = max(basin[cell], uint8(math.Round(255*w)))
+				}
 			})
 		case ft == structure.TypeRift:
 			a := *pl.f.AxisFraction
-			err = eachLine(pl, func(cell int, u, s float64) {
+			err = eachLine(bb, func(cell int, u, s float64) {
 				if u < a {
 					floor := max(pl.at(pl.regional, s), float64(f[cell])) - pl.at(pl.relief, s)
 					deepen(cell, kernel(u/a)*max(0, float64(out[cell])-floor))
 				}
 			})
 		case ft == structure.TypeFault && pl.f.Sense == "strike_slip":
-			err = eachLine(pl, func(cell int, u, _ float64) {
+			err = eachLine(bb, func(cell int, u, _ float64) {
 				w := kernel(u)
 				deepen(cell, w*pl.offset)
 				core(k, cell, w)
 			})
 		case ft == structure.TypeFault && pl.f.Sense == "normal":
-			err = eachLine(pl, func(cell int, u, _ float64) {
+			err = eachLine(bb, func(cell int, u, _ float64) {
 				if downside(pl, cell) {
 					deepen(cell, kernel(u)*pl.offset/2)
 				}
 			})
 		}
 		if err != nil {
-			return nil, nil, err
+			return nil, err
+		}
+	}
+	if comp != nil {
+		for _, t := range comp.file.Troughs {
+			l := structure.NewLine(dom, t.Backbone).Length()
+			fade := min(bp.FadeKM[0], l/3)
+			err := eachLine(t.Backbone, func(cell int, u, s float64) {
+				deepen(cell, kernel(u)*min(smoothstep(0, fade, s), smoothstep(0, fade, l-s))*t.DepthM)
+			})
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	for i := range out {
 		out[i] -= dep[i]
 	}
 
-	diags := make([]FeatureDiagnostics, len(plans))
+	res := &synthesis{elevation: out}
+	if comp != nil {
+		// Ridges and peaks combine by maximum in dep's place, and add to
+		// the regional surface.
+		ridge := dep
+		clear(ridge)
+		if err := comp.rasterize(ctx, dom, g, basin, ridge); err != nil {
+			return nil, err
+		}
+		for i := range out {
+			out[i] += ridge[i]
+		}
+		var err error
+		if res.trenches, err = trenchDepressions(ctx, seed, *bp, p.ControlSpacingKM, dom, g, tf, land, out); err != nil {
+			return nil, err
+		}
+		comp.saddles(dom, g, out)
+		res.ridges = comp.file
+	}
+
+	res.features = make([]FeatureDiagnostics, len(plans))
 	for k, pl := range plans {
 		d := FeatureDiagnostics{ID: pl.f.ID, Type: pl.f.Type, Kind: pl.f.Kind, RegionalM: span(pl.regional), ReliefM: span(pl.relief), OffsetM: pl.offset}
 		if pl.f.Type == structure.TypeFault {
 			d.Kind = pl.f.Sense
 		}
-		if c := cores[k]; len(c) > 0 {
-			d.Core = Stats{Cells: len(c), MinM: math.Inf(1), MaxM: math.Inf(-1)}
-			sum := 0.0
-			for _, cell := range c {
-				e := float64(out[cell])
-				d.Core.MinM, d.Core.MaxM = min(d.Core.MinM, e), max(d.Core.MaxM, e)
-				sum += e
-			}
-			d.Core.MeanM = sum / float64(len(c))
-		}
-		diags[k] = d
+		d.Core = cellStats(out, cores[k])
+		res.features[k] = d
 	}
-	return out, diags, ctx.Err()
+	return res, ctx.Err()
+}
+
+// cellStats summarizes v over the given cells.
+func cellStats(v []float32, cells []int32) Stats {
+	if len(cells) == 0 {
+		return Stats{}
+	}
+	st := Stats{Cells: len(cells), MinM: math.Inf(1), MaxM: math.Inf(-1)}
+	sum := 0.0
+	for _, cell := range cells {
+		e := float64(v[cell])
+		st.MinM, st.MaxM = min(st.MinM, e), max(st.MaxM, e)
+		sum += e
+	}
+	st.MeanM = sum / float64(len(cells))
+	return st
 }
 
 // shelfNarrowing returns, for every cell, how far the shelf is narrowed

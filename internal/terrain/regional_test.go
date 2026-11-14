@@ -9,6 +9,7 @@ import (
 
 	"github.com/maloquacious/mapgen/internal/continent"
 	"github.com/maloquacious/mapgen/internal/structure"
+	"github.com/maloquacious/mapgen/internal/trench"
 )
 
 // A 600 x 300 km torus of 6 km cells.
@@ -57,11 +58,19 @@ func surface(t *testing.T, seed uint64, f []float32, features ...structure.Featu
 	if err := ff.Validate(testDom); err != nil {
 		t.Fatal(err)
 	}
-	out, diags, err := regional(t.Context(), seed, DefaultRegionalParams(), testGrid, ff, f)
+	syn := synthesize(t, seed, nil, nil, nil, f, ff)
+	return syn.elevation, syn.features
+}
+
+// synthesize builds the surface over f with belt parameters bp, or the
+// regional surface alone when bp is nil, and trenches tf.
+func synthesize(t *testing.T, seed uint64, bp *BeltParams, tf *trench.TrenchFile, land []byte, f []float32, ff *structure.FeatureFile) *synthesis {
+	t.Helper()
+	syn, err := regional(t.Context(), seed, DefaultRegionalParams(), bp, testGrid, ff, tf, land, f)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return out, diags
+	return syn
 }
 
 func near(a, b float64) bool { return math.Abs(a-b) <= 1e-3*max(1, math.Abs(b)) }

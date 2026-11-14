@@ -50,6 +50,11 @@ var (
 	}
 	previewBackbone = color.RGBA{30, 20, 20, 255}
 	previewTrench   = color.RGBA{230, 30, 30, 255}
+	previewChain    = color.RGBA{250, 250, 245, 255}
+	previewBranch   = color.RGBA{200, 200, 190, 255}
+	previewTrough   = color.RGBA{40, 90, 200, 255}
+	previewCorridor = color.RGBA{0, 200, 220, 255}
+	previewPeak     = color.RGBA{200, 0, 0, 255}
 )
 
 // tint interpolates the stops at m, clamping beyond the ends.
@@ -120,7 +125,8 @@ func writePreview(ctx context.Context, path string, r *Result, scale int) error 
 
 // writeStructurePreview draws the surface in the same tint without shading,
 // each feature's envelope outline, every backbone, and every trench backbone,
-// sampling every scale-th cell. Later steps add ridge chains and corridors.
+// ridge chains, branches, troughs, corridors, and volcanic peaks, sampling
+// every scale-th cell.
 func writeStructurePreview(ctx context.Context, path string, r *Result, scale int) error {
 	g := r.Manifest.Grid
 	dom := r.Structure.Features.Domain
@@ -180,6 +186,30 @@ func writeStructurePreview(ctx context.Context, path string, r *Result, scale in
 	}
 	for i := range r.Trenches.Trenches {
 		line(r.Trenches.Trenches[i].Backbone, previewTrench)
+	}
+	if rf := r.Ridges; rf != nil {
+		for _, t := range rf.Troughs {
+			line(t.Backbone, previewTrough)
+		}
+		for _, rd := range rf.Ridges {
+			c := previewChain
+			if rd.Kind == RidgeBranch {
+				c = previewBranch
+			}
+			line(rd.Backbone, c)
+		}
+		for _, cr := range rf.Corridors {
+			line(cr.Backbone, previewCorridor)
+		}
+		cw, ch := dom.WidthKM/float64(w), dom.HeightKM/float64(h)
+		for _, pk := range rf.Peaks {
+			x, y := int(pk.X/cw), int(pk.Y/ch)
+			for dy := -1; dy <= 1; dy++ {
+				for dx := -1; dx <= 1; dx++ {
+					img.SetRGBA(((x+dx)%w+w)%w, ((y+dy)%h+h)%h, previewPeak)
+				}
+			}
+		}
 	}
 	return encode(path, img)
 }

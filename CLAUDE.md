@@ -54,8 +54,9 @@ Contracts and invariants (wrapping, determinism, land fraction, artifact formats
    See [cmd/trench/README.md](cmd/trench/README.md).
 
 5. `cmd/terrain`: builds ground and seabed elevation from a `trench` artifact and writes a self-contained terrain checkpoint that retains the structure and trench records.
-   So far it builds the continental foundation and the regional surface (steps 1 and 2 of the terrain design): an exact full-resolution torus coast distance, a coastal plain rising to smoothed province base levels, a shelf (narrow near active margins and arcs), slope, and abyssal plain; then every feature pulls that surface toward its drawn regional target through its envelope weight, uplifts combining by the largest plus a quarter of the next, depressions by the largest.
-   Elevations are relative to the provisional coast at 0 m; ridge chains, passes, volcanic peaks, and trench depressions come next.
+   So far it builds the continental foundation, the regional surface, and belt components (steps 1 to 3 of the terrain design): an exact full-resolution torus coast distance, a coastal plain rising to smoothed province base levels, a shelf (narrow near active margins and arcs), slope, and abyssal plain; then every feature pulls that surface toward its drawn regional target through its envelope weight, uplifts combining by the largest plus a quarter of the next, depressions by the largest.
+   Belts then carry ridge chains with gaps, branches, troughs, and corridors with saddles; arcs and active margins carry volcanic peaks; trenches deepen the seabed. These are published in `ridges.json`.
+   Elevations are relative to the provisional coast at 0 m; subcell sampling comes next.
    See [cmd/terrain/README.md](cmd/terrain/README.md).
 
 Later stages (terrain features, the terrain-based landmask, drainage, climate, biomes, resources) are not implemented yet.
@@ -70,7 +71,7 @@ The planned generation order is `continents → structure → trench → terrain
 - `internal/landmask`: creating, storing, and loading the land/ocean artifact.
 - `internal/structure`: feature records and their validation, toroidal geometry queries, province partitioning, coast interpretation, automatic placement, geology proxies and rock classification, recentering, and the structure artifact.
 - `internal/trench`: subduction polarity, trench placement and clipping, trench records and their validation, recentering, and the trench artifact.
-- `internal/terrain`: the coast distance transform, the continental foundation, the regional surface, and the terrain artifact.
+- `internal/terrain`: the coast distance transform, the continental foundation, the regional surface, belt components and ridge records, trench depressions, and the terrain artifact.
 - `internal/artifact`: helpers shared by packages that publish artifact directories.
 - `internal/prng`: reproducible random streams derived from a seed and a domain name.
 - `internal/cerrs`: constant sentinel errors.

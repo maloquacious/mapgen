@@ -10,12 +10,12 @@ go run ./cmd/terrain --in tmp/trench --png-scale 3 --out tmp/terrain
 ```
 
 The design is in [Terrain Generation Design.md](<../../Terrain Generation Design.md>).
-This covers implementation steps 1 and 2 of that design: the continental foundation, the artifact, and the regional surface each feature pulls the foundation toward, evaluated at cell centers.
+This covers implementation steps 1 to 3 of that design: the continental foundation, the artifact, the regional surface each feature pulls the foundation toward, and belt components, volcanic peaks, and trench depressions, evaluated at cell centers.
 
 ## Not implemented yet
 
-- Ridge chains, branches, longitudinal basins, corridors and passes, volcanic peaks, and trench depressions (step 3), and `ridges.json`.
-- Subcell sampling (step 4): `feature_synthesis` is `regional-v1`, so `high` equals `elevation` and `relief` is 0.
+- Subcell sampling (step 4): `feature_synthesis` is `belts-v1`, evaluated at cell centers, so `high` equals `elevation` and `relief` is 0, and peaks narrower than a cell may fall between centers.
+- Plateau rim roughness and residual detail (step 5).
 - `preview-relief.png` and `preview-change.png`.
 - `--residual`, `--recenter`, `--workers`, and `--config`.
 
@@ -63,17 +63,32 @@ A feature whose record gives no targets uses the ranges structure's automatic pl
 Uplifts combine by the largest plus a quarter of the second largest, so crossing belts do not double; then the largest depression applies, so a basin inside a belt's flank lowers it to the basin's level.
 The manifest records every value as `regional_parameters`.
 
+## Belt components, peaks, and trenches
+
+Each mountain belt carries ridge chains (3–6 for a collision belt, 2–4 otherwise) that follow its backbone at different offsets, wander, fade in and out at their ends and gaps, and stay within 0.9 of the half width.
+Their height above the regional surface is the relief draw, lower with maturity; the main chain, on an active margin the one nearest the coast, is highest.
+Gaps grow more frequent and longer with maturity, valleys wider, and branches fewer.
+Branches leave chains outward and taper to nothing; troughs between adjacent chains lower the regional surface 100–600 m.
+Corridors cross each belt every 300–700 km and lower every ridge on their line by 60–85 percent of its height, so each saddle is a pass above the regional surface.
+Active margins may carry volcanic peaks, and island arcs always do: cones 10–40 km across, 50–150 km apart.
+Ridges and peaks fade out over basins.
+
+Each trench lowers the seabed along its axis toward its floor, drawn within the trench record's range, easing to the surrounding seabed at the edge of its width and at its ends.
+It never lowers provisional land.
+The manifest records every value as `belt_parameters`.
+
 ## Output
 
 | File | Content |
 | --- | --- |
-| `manifest.json` | Format `mapgen-terrain-v3`, versions, the input trench manifest (which records the structure manifest) and its checksum, seed, grid, datum, parameters, retained records, and checksums |
+| `manifest.json` | Format `mapgen-terrain-v4`, versions, the input trench manifest (which records the structure manifest) and its checksum, seed, grid, datum, parameters, retained records, and checksums |
 | `elevation.f32`, `high.f32`, `relief.f32` | Float32 rasters, row-major, row 0 at the north |
 | `features.json`, `provinces.json`, `provinces.u32`, `provisional-land.u8`, `rock.u8`, `pressure.f32`, `shear.f32`, `igneous.f32`, `rock-noise.f32` | The structure records, byte for byte |
 | `trenches.json` | The trench records, byte for byte |
-| `diagnostics.json` | Elevation and relief statistics on provisional land and water, the shift at the provisional fraction, and for each feature its drawn targets and the elevation of its core (the cells where its weight is at least 0.9; a rift's shoulders) |
+| `ridges.json` | Ridge chains and branches, troughs, corridors with their saddles, and volcanic peaks, in km, keyed by parent feature |
+| `diagnostics.json` | Elevation and relief statistics on provisional land and water, the shift at the provisional fraction, for each feature its drawn targets and the elevation of its core (the cells where its weight is at least 0.9; a rift's shoulders), counts of the ridge records, and for each trench its drawn floor and axis elevation |
 | `preview.png` | Hypsometric tint with hill shading, and the coast at the provisional fraction as a line |
-| `preview-structure.png` | The same tint without shading, each feature's envelope outline, every backbone, and trench backbones in red |
+| `preview-structure.png` | The same tint without shading, each feature's envelope outline, every backbone, trench backbones in red, ridge chains in white, branches in grey, troughs in blue, corridors in cyan, and volcanic peaks as red dots |
 
 The continental affinity fields are not kept; their checksums remain in the recorded input manifest chain.
 The shift reports what `landmask` would do at the provisional land fraction: the elevation it would move to 0 m, and how many cells would change sides.

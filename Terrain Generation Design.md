@@ -203,18 +203,40 @@ Ridge chains, branches, and corridors are sparse vector records published in `ri
 Maturity controls shape, not a single height factor.
 As maturity rises, chain amplitude falls toward the bottom of the relief range, gaps grow more frequent and longer, valley widths grow, branches thin out, and residual amplitude falls.
 
+`belts-v1` builds the components this way; every value is recorded as `belt_parameters`.
+
+- **Chains** are offset curves of the backbone, sampled every 15 km, evenly spaced within 0.6 of the half width and jittered by up to a fifth of their spacing.
+  Each wanders across the belt by up to 0.08 of the half width, as the mean of two sinusoids with wavelengths of 200–600 km.
+  A chain's kernel half width is 0.55–0.8 of the chain spacing, narrowed by up to 35 percent with maturity, and at least 12 km; chain, kernel, and wander stay within 0.9 of the half width.
+  A vertex whose step runs backward is dropped, removing the loops an offset curve forms in a tight bend.
+  Each chain starts and ends up to a tenth of the backbone's length from its ends.
+- **Amplitude** is the relief draw at the nearest backbone position, pulled toward the bottom of the relief range by 0.7 × maturity.
+  The main chain has the full amplitude: on an active margin the chain nearest the coast, opposite the elevated flank; otherwise the middle chain.
+  The others draw 0.6–0.95 of it, the larger values going to the chains nearest the main chain.
+- **Gaps** occur 0.3 per 1000 km of chain at maturity 0, rising to 2.5 at maturity 1, at exponentially distributed distances, each 20–80 km long times 1 + 2 × maturity.
+- **Branches** leave a chain 1.2 per 1000 km at maturity 0, falling to 0.2 at maturity 1, at 25–50° outward from it, reaching half to all of the room left to 0.9 of the half width, at 0.4–0.7 of the chain's amplitude and tapering to nothing.
+  A branch shorter than 30 km is not placed.
+- **Troughs** lie midway between adjacent chains with probability 0.3 at maturity 0 to 0.7 at maturity 1, over 100–400 km, 100–600 m deep, as depressions of the regional surface under the largest-depression rule.
+- **Corridors** cross the belt every 300–700 km, up to 20° from square, with a kernel half width of 15–40 km, lowering every ridge of the belt by 0.6–0.85 of its height on their line, so the saddles stay above the regional surface.
+  A saddle is published where a corridor crosses a ridge, with the surface elevation of the cell there.
+- **Volcanic peaks** of an active margin, present with probability 0.6, lie halfway from the backbone to the main chain, 50–150 km apart, 10–40 km across, 0.7–1.1 of the amplitude high.
+- Chains, branches, and peaks combine by maximum and add to the regional surface.
+  Over a basin they fade out with the basin's weight, so an intermontane or foreland basin stays a basin.
+  A ridge's kernel or a peak may reach a little past a narrow envelope.
+
 ### Other features
 
 - **Plateau:** a flat surface at its regional target inside its outline, rising over `edge_km`.
-  Its relief target sets low-amplitude rolling detail and a rougher, dissected rim along the edge band.
+  Its relief target sets low-amplitude rolling detail and a rougher, dissected rim along the edge band; these come with residual detail (step 5).
   It blends with its parent belt's flank through the uplift rule.
 - **Basin:** a depression to its regional target, which is low (0–400 m on land), with a smooth floor.
   A basin under the datum floods at `landmask` only if it connects to the ocean; otherwise it is a closed depression for drainage to resolve.
 - **Rift:** the shoulders are uplift to the regional target, at full weight within `axis_fraction` `a` of the half width and weighing `K((t − a) / (1 − a))` beyond it; the axis is a depression weighing `K(t / a)` to the shoulder level, the larger of the target and the foundation, minus the relief draw.
   So the shoulders crest at the axis edge, and the axis floor may fall under the datum: a rift can become an inlet, a lake, or an arm of the sea.
-- **Island arc:** a submarine ridge to its regional target, plus separate volcanic peaks along the backbone, each a compact cone 10–40 km across, 50–150 km apart, with heights from the relief draw.
+- **Island arc:** a submarine ridge to its regional target, plus separate volcanic peaks along the backbone, each a compact cone 10–40 km across, 50–150 km apart, 0.6–1 of the relief draw high, with the profile `K(r / radius)`.
   Peaks that rise above sea level after `landmask` become the arc's islands.
 - **Trench:** each trench record is a narrow depression along its backbone, to its floor target below the datum, deepest on the axis and easing to the surrounding seabed at the edge of its width.
+  The floor is drawn within the record's range as control samples every 150–400 km, like a feature's targets, and the depression fades in over 100 km at each end, or a third of the trench's length if shorter.
   The `trench` stage decides where trenches lie and on which side of their parents; terrain only gives them depth.
   A trench never lowers provisional land: trench placement looks past islands smaller than structure's province minimum, and those islands stay.
 - **Fault:** a narrow linear form within its width, weighted by `K(t)`: a trough 50–200 m deep for `strike_slip`, a step of 100–300 m across the line for `normal`, and a low ridge 100–300 m high for `thrust`.
@@ -262,8 +284,8 @@ All streams use `prng.New(seed, domain, sequence)` with the terrain seed:
 | --- | --- | --- |
 | `terrain-v1/foundation/provinces` | Province ID | Interior base level of one province |
 | `terrain-v1/foundation/fields` | Field number | Smooth fields: interior variation (0), shelf depth (1), shelf width (2), abyssal depth (3) |
-| `terrain-v1/feature` | Feature `key` | Target control samples, chains, branches, gaps, corridors, and peaks for one feature. A fault draws its offset, then its downthrown side; a linear feature its control spacing, then a regional and a relief value at each control sample; an area feature its regional and relief values. Later steps draw after these |
-| `terrain-v1/trench` | Trench `key` | The floor depth and along-axis variation of one trench |
+| `terrain-v1/feature` | Feature `key` | Target control samples, chains, branches, gaps, corridors, and peaks for one feature. A fault draws its offset, then its downthrown side; a linear feature its control spacing, then a regional and a relief value at each control sample; an area feature its regional and relief values. A mountain belt then draws its chain count, chain width share, and for each chain its jitter, scale, two wavelengths and phases, two end trims, and fade; then each chain's gaps, each chain's branches (angle, reach, scale, side), each adjacent pair's trough (presence, start, length, depth), its corridors (angle, half width, saddle share), and for an active margin the presence of volcanic peaks and then each peak (diameter, height). An island arc draws its peaks |
+| `terrain-v1/trench` | Trench `key` | The floor of one trench: its control spacing, then a floor value at each control sample |
 | `terrain-v1/residual` | Octave number | One octave of residual noise |
 
 Using the feature `key`, not the feature ID or its position in the list, keeps each feature's terrain independent of every other feature: adding, removing, or reordering a feature in a fixture leaves the others unchanged.
@@ -272,7 +294,7 @@ The order of draws within each stream is part of `terrain-v1`; changing it chang
 
 ## Saved artifact
 
-The format is `mapgen-terrain-v3`; v2 read a trench checkpoint instead of a structure checkpoint, and v3 adds the regional surface.
+The format is `mapgen-terrain-v4`; v2 read a trench checkpoint instead of a structure checkpoint, v3 added the regional surface, and v4 adds belt components, peaks, trench depressions, and `ridges.json`.
 
 | Content | Purpose |
 | --- | --- |
@@ -280,7 +302,7 @@ The format is `mapgen-terrain-v3`; v2 read a trench checkpoint instead of a stru
 | `elevation.f32` | `ElevationM`: mean solid surface elevation, m, relative to the provisional datum |
 | `high.f32` | `HighM`: representative high, m, at least `ElevationM` |
 | `relief.f32` | `ReliefM`: representative high minus valley, m, at least 0 |
-| `ridges.json` | Ridge chains, branches, corridors, and saddles in the structure coordinate convention, keyed by parent feature |
+| `ridges.json` | Format `mapgen-ridges-v1`: ridge chains and branches (backbones with kernel widths, and gaps in km along them), troughs with depths, corridors with saddle shares and saddles (ridge, position, elevation), and volcanic peaks (position, radius, height), in the structure coordinate convention, keyed by parent feature |
 | Retained records | The structure records `features.json`, `provinces.json`, `provinces.u32`, `provisional-land.u8`, `rock.u8`, `pressure.f32`, `shear.f32`, `igneous.f32`, `rock-noise.f32`, and the trench records `trenches.json`, unchanged |
 | `diagnostics.json` | Elevation and relief statistics on provisional land and water, the datum shift and changed cells at the provisional fraction, target conformance per feature (its drawn targets and the elevation of its core, the cells where its own weight is at least 0.9, a rift's shoulders), and noise bounds measured |
 | Previews | See "Previews and acceptance" |
@@ -360,8 +382,9 @@ The terrain-mode artifact carries the clamped elevation, high, and relief fields
    Envelope weights and target interpretation for every feature type, the combination rule, narrow shelves near margins and arcs, and `preview-structure.png`, with residual off.
    The surface is evaluated at cell centers; step 4 replaces that with subcell sampling.
    The structure fixture's handoff test shows every feature in the surface, with each draw in its range.
-3. **Belt components.**
+3. **Belt components.** Done.
    Ridge chains, branches, longitudinal basins, corridors and saddles, volcanic peaks, the trench depressions from the trench records, and `ridges.json`.
+   Still evaluated at cell centers, so peaks narrower than a cell may fall between centers until step 4.
 4. **Subcell rasterization.**
    The 4 by 4 sampling, high and relief, the subcell relief model, the spatial index, and parallel tiles with the worker-count test.
 5. **Residual detail** with its bounds tests.
@@ -375,7 +398,7 @@ Structure step 3 is finished: automatic placement produces every feature kind, i
 An interrupted belt is a chain of `old_orogen` segments, each after the first naming the first as its parent; terrain treats each segment as an ordinary belt.
 
 The `trench` stage is implemented; terrain reads its checkpoint.
-The structure fixture's world is too small for a trench, so the handoff test of trench depressions needs a larger fixture or an automatically placed structure.
+The structure fixture's world is too small for a trench, so trench depressions are tested on a synthetic trench record; a handoff test through the trench stage still needs a larger fixture or an automatically placed structure.
 
 ## Decisions
 

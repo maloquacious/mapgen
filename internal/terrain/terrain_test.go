@@ -120,8 +120,19 @@ func TestFoundationKeepsProvisionalCoast(t *testing.T) {
 	ff := r.Structure.Features
 	g := r.Manifest.Grid
 	reach := make([]bool, len(land))
+	shapes := []structure.Shape{}
 	for i := range ff.Features {
-		for k, in := range structure.Cover(ff.Domain, g.Columns, g.Rows, ff.Features[i].Shape(ff.Domain)) {
+		shapes = append(shapes, ff.Features[i].Shape(ff.Domain))
+	}
+	// Ridges and peaks may reach a little past a narrow envelope.
+	for _, rd := range r.Ridges.Ridges {
+		shapes = append(shapes, structure.NewLine(ff.Domain, rd.Backbone))
+	}
+	for _, pk := range r.Ridges.Peaks {
+		shapes = append(shapes, structure.NewLine(ff.Domain, []structure.Sample{{X: pk.X, Y: pk.Y, WidthKM: 2 * pk.RadiusKM}, {X: pk.X + 1e-3, Y: pk.Y, WidthKM: 2 * pk.RadiusKM}}))
+	}
+	for _, sh := range shapes {
+		for k, in := range structure.Cover(ff.Domain, g.Columns, g.Rows, sh) {
 			reach[k] = reach[k] || in
 		}
 	}
@@ -239,7 +250,7 @@ func TestArtifactRoundTrip(t *testing.T) {
 			t.Errorf("retained %s", name)
 		}
 	}
-	for _, name := range []string{terrain.ManifestFile, terrain.DiagnosticsFile, terrain.PreviewFile, "elevation.f32", "high.f32", "relief.f32", structure.FeaturesFile, structure.RockFile, trench.TrenchesFile} {
+	for _, name := range []string{terrain.ManifestFile, terrain.DiagnosticsFile, terrain.PreviewFile, terrain.PreviewStructureFile, terrain.RidgesFile, "elevation.f32", "high.f32", "relief.f32", structure.FeaturesFile, structure.RockFile, trench.TrenchesFile} {
 		if _, ok := want[name]; !ok {
 			t.Errorf("missing %s", name)
 		}

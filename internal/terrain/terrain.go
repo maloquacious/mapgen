@@ -41,13 +41,14 @@ import (
 )
 
 const (
-	Format          = "mapgen-terrain-v3"
+	Format          = "mapgen-terrain-v4"
 	Topology        = "torus: x and y wrap; the map may be recentered until climate"
 	Datum           = "provisional: 0 m is the provisional coast of the structure records, not sea level"
 	SeedExplicit    = "explicit"
 	SeedFromInput   = "trench input"
 	ManifestFile    = "manifest.json"
 	DiagnosticsFile = "diagnostics.json"
+	RidgesFile      = "ridges.json"
 	PreviewFile     = "preview.png"
 	// PreviewStructureFile is the surface without shading, with feature
 	// envelopes, backbones, and trench backbones drawn over it.
@@ -94,11 +95,13 @@ type Manifest struct {
 	ProvisionalLandCells    int              `json:"provisional_land_cells"`
 	FoundationParameters    FoundationParams `json:"foundation_parameters"`
 	RegionalParameters      RegionalParams   `json:"regional_parameters"`
+	BeltParameters          BeltParams       `json:"belt_parameters"`
 	// FeatureSynthesis names how far features are synthesized. With
-	// RegionalAlgorithm the surface is the regional surface evaluated at
-	// cell centers, with no ridges or subcell sampling, so HighM equals
-	// ElevationM and ReliefM is 0.
+	// BeltAlgorithm the surface is the regional surface with belt
+	// components, peaks, and trenches, evaluated at cell centers without
+	// subcell sampling, so HighM equals ElevationM and ReliefM is 0.
 	FeatureSynthesis string `json:"feature_synthesis"`
+	Ridges           File   `json:"ridges"`
 	// Retained lists the structure and trench records copied unchanged, as
 	// the input manifest describes them.
 	Retained    []File            `json:"retained"`
@@ -134,6 +137,36 @@ type Diagnostics struct {
 	// Features reports each feature's drawn targets and core elevation, in
 	// feature order.
 	Features []FeatureDiagnostics `json:"features"`
+	// Ridges counts the belt components published in ridges.json.
+	Ridges RidgeCounts `json:"ridges"`
+	// Trenches reports each trench's drawn floor and axis elevation.
+	Trenches []TrenchDiagnostics `json:"trenches"`
+}
+
+// RidgeCounts counts the records of ridges.json.
+type RidgeCounts struct {
+	Chains    int `json:"chains"`
+	Branches  int `json:"branches"`
+	Troughs   int `json:"troughs"`
+	Corridors int `json:"corridors"`
+	Saddles   int `json:"saddles"`
+	Peaks     int `json:"peaks"`
+}
+
+// count counts the records of rf.
+func (rf *RidgeFile) count() RidgeCounts {
+	c := RidgeCounts{Troughs: len(rf.Troughs), Corridors: len(rf.Corridors), Peaks: len(rf.Peaks)}
+	for _, r := range rf.Ridges {
+		if r.Kind == RidgeChain {
+			c.Chains++
+		} else {
+			c.Branches++
+		}
+	}
+	for _, cr := range rf.Corridors {
+		c.Saddles += len(cr.Saddles)
+	}
+	return c
 }
 
 // Result keeps everything in the input's coordinates.
@@ -144,6 +177,7 @@ type Result struct {
 	Elevation []float32
 	High      []float32
 	Relief    []float32
+	Ridges    *RidgeFile
 	// foundation is the surface with no features. It is derived, not saved.
 	foundation []float32
 	// Above marks the cells landmask's quantile selection would make land
@@ -190,7 +224,7 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 		seed, source = *o.Seed, SeedExplicit
 	}
 	g := sm.Grid
-	p, rp := DefaultFoundationParams(), DefaultRegionalParams()
+	p, rp, bp := DefaultFoundationParams(), DefaultRegionalParams(), DefaultBeltParams()
 	r := &Result{
 		Manifest: Manifest{
 			Format: Format, GeneratorVersion: o.Version,
@@ -198,7 +232,7 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 			Seed:  seed, SeedSource: source, SeedDerivation: prng.DerivationVersion, PRNG: prng.Algorithm,
 			Grid: g, Topology: Topology, Datum: Datum,
 			ProvisionalLandFraction: sm.ProvisionalLandFraction, ProvisionalLandCells: sm.ProvisionalLandCells,
-			FoundationParameters: p, RegionalParameters: rp, FeatureSynthesis: RegionalAlgorithm, Retained: tm.Records(),
+			FoundationParameters: p, RegionalParameters: rp, BeltParameters: bp, FeatureSynthesis: BeltAlgorithm, Retained: tm.Records(),
 		},
 		Structure: s, Trenches: tr.Trenches, records: records,
 	}
@@ -217,9 +251,12 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 	if r.foundation, err = fd.elevation(ctx, p, g, dist, narrow); err != nil {
 		return nil, err
 	}
-	if r.Elevation, r.Diagnostics.Features, err = regional(ctx, seed, rp, g, s.Features, r.foundation); err != nil {
+	syn, err := regional(ctx, seed, rp, &bp, g, s.Features, tr.Trenches, s.Land, r.foundation)
+	if err != nil {
 		return nil, err
 	}
+	r.Elevation, r.Ridges = syn.elevation, syn.ridges
+	r.Diagnostics.Features, r.Diagnostics.Trenches, r.Diagnostics.Ridges = syn.features, syn.trenches, syn.ridges.count()
 	r.High = slices.Clone(r.Elevation)
 	r.Relief = make([]float32, len(r.Elevation))
 	r.diagnose()
@@ -332,7 +369,13 @@ func Write(ctx context.Context, dir string, r *Result, previewScale int) error {
 	}
 	diagnostics = append(diagnostics, '\n')
 	m.Diagnostics = File{File: DiagnosticsFile, Format: "json", SHA256: checksum(diagnostics),
-		Description: "elevation and relief statistics on provisional land and water, the datum shift at the provisional fraction, and each feature's drawn targets and core elevation"}
+		Description: "elevation and relief statistics on provisional land and water, the datum shift at the provisional fraction, each feature's drawn targets and core elevation, ridge counts, and each trench's floor and axis elevation"}
+	ridges, err := r.Ridges.Marshal()
+	if err != nil {
+		return err
+	}
+	m.Ridges = File{File: RidgesFile, Format: RidgesFormat, SHA256: checksum(ridges),
+		Description: "ridge chains, branches, troughs, corridors with their saddles, and volcanic peaks, in km, keyed by parent feature"}
 	manifest, err := json.Marshal(m, json.Deterministic(true), jsontext.WithIndent("  "))
 	if err != nil {
 		return err
@@ -340,7 +383,7 @@ func Write(ctx context.Context, dir string, r *Result, previewScale int) error {
 	for _, f := range []struct {
 		name string
 		data []byte
-	}{{DiagnosticsFile, diagnostics}, {ManifestFile, append(manifest, '\n')}} {
+	}{{DiagnosticsFile, diagnostics}, {RidgesFile, ridges}, {ManifestFile, append(manifest, '\n')}} {
 		if err := os.WriteFile(filepath.Join(tmp, f.name), f.data, 0o644); err != nil {
 			return err
 		}
@@ -396,7 +439,7 @@ func Load(ctx context.Context, dir string) (*Result, error) {
 	if m.Format != Format {
 		return nil, fmt.Errorf("unsupported terrain format %q", m.Format)
 	}
-	if m.FeatureSynthesis != RegionalAlgorithm {
+	if m.FeatureSynthesis != BeltAlgorithm {
 		return nil, fmt.Errorf("unsupported feature synthesis %q", m.FeatureSynthesis)
 	}
 	tm := m.Input.Manifest
@@ -424,7 +467,24 @@ func Load(ctx context.Context, dir string) (*Result, error) {
 	if checksum(ddata) != m.Diagnostics.SHA256 {
 		return nil, fmt.Errorf("%s: checksum mismatch", DiagnosticsFile)
 	}
-	r := &Result{Manifest: m, Structure: tr.Structure, Trenches: tr.Trenches, records: records}
+	if m.Ridges.File != RidgesFile {
+		return nil, fmt.Errorf("manifest names %q where %q is expected", m.Ridges.File, RidgesFile)
+	}
+	rdata, err := os.ReadFile(filepath.Join(dir, RidgesFile))
+	if err != nil {
+		return nil, err
+	}
+	if checksum(rdata) != m.Ridges.SHA256 {
+		return nil, fmt.Errorf("%s: checksum mismatch", RidgesFile)
+	}
+	ridges, err := ParseRidges(rdata)
+	if err != nil {
+		return nil, err
+	}
+	if err := ridges.Validate(tr.Structure.Features); err != nil {
+		return nil, err
+	}
+	r := &Result{Manifest: m, Structure: tr.Structure, Trenches: tr.Trenches, Ridges: ridges, records: records}
 	if err := json.Unmarshal(ddata, &r.Diagnostics); err != nil {
 		return nil, fmt.Errorf("%s: %w", DiagnosticsFile, err)
 	}
