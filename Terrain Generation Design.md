@@ -378,10 +378,8 @@ These choices were open and are settled:
 
 - Trenches are records of their own `trench` stage, between structure and terrain, rather than a terrain addition or a structure feature.
 - Landform classes (plain, hills, mountain, plateau, basin) are deferred until after drainage, since they depend on the final coast and valleys.
-
-## Open decisions
-
-These choices are made above, but are worth confirming before implementation:
-
-- the provisional datum, with the provisional coast at 0 m, rather than terrain choosing sea level itself;
-- dropping the continental affinity fields from the terrain artifact.
+- Elevations are relative to the provisional datum, with the provisional coast at 0 m; terrain does not choose sea level.
+  `landmask` alone counts the land exactly and decides which low ground joins the ocean, the land fraction can change without regenerating terrain, and terrain reports the shift `landmask` would make.
+- The continental affinity fields are not carried past structure.
+  No later stage reads them: provinces mark oceanic and continental crust, and elevation replaces the layout values.
+  If a later stage needs a continuous crust value, the intermediate stages will be extended to carry it forward.
