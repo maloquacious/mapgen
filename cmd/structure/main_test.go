@@ -7,8 +7,8 @@ import (
 	"image/png"
 	"io"
 	"os"
-	"reflect"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/maloquacious/mapgen/internal/continent"
