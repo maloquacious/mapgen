@@ -42,10 +42,7 @@ func bigSynth(t *testing.T, seed uint64, bp *BeltParams, tf *trench.TrenchFile, 
 	if err := ff.Validate(bigDom); err != nil {
 		t.Fatal(err)
 	}
-	syn, err := regional(t.Context(), seed, DefaultRegionalParams(), bp, bigGrid, ff, tf, land, f)
-	if err != nil {
-		t.Fatal(err)
-	}
+	syn := synth(t, seed, bp, 1, bigGrid, ff, tf, land, f)
 	if syn.ridges != nil {
 		if err := syn.ridges.Validate(ff); err != nil {
 			t.Fatal(err)
@@ -262,17 +259,22 @@ func TestComponentSeams(t *testing.T) {
 		}
 		return b
 	}
-	const kx, ky = 150, 70 // cells; the moved belt crosses both seams
-	a := bigSynth(t, 5, &bp, nil, nil, bigFlat(100), place(0, 0))
-	b := bigSynth(t, 5, &bp, nil, nil, bigFlat(100), place(kx*6, ky*6))
-	if len(a.ridges.Ridges) != len(b.ridges.Ridges) || len(a.ridges.Peaks) != len(b.ridges.Peaks) {
-		t.Fatalf("components differ: %d and %d ridges", len(a.ridges.Ridges), len(b.ridges.Ridges))
-	}
-	for i, e := range a.elevation {
-		c, r := i%bigCols, i/bigCols
-		j := ((r+ky)%bigRows)*bigCols + (c+kx)%bigCols
-		if math.Abs(float64(e-b.elevation[j])) > 1 {
-			t.Fatalf("cell (%d, %d): %g, translated %g", c, r, e, b.elevation[j])
+	const kx, ky = 150, 70 // cells; the moved belt crosses both seams and tiles
+	for _, samples := range []int{1, 4} {
+		ff := func(f structure.Feature) *structure.FeatureFile {
+			return &structure.FeatureFile{Format: structure.FeaturesFormat, Domain: bigDom, Features: []structure.Feature{f}}
+		}
+		a := synth(t, 5, &bp, samples, bigGrid, ff(place(0, 0)), nil, nil, bigFlat(100))
+		b := synth(t, 5, &bp, samples, bigGrid, ff(place(kx*6, ky*6)), nil, nil, bigFlat(100))
+		if len(a.ridges.Ridges) != len(b.ridges.Ridges) || len(a.ridges.Peaks) != len(b.ridges.Peaks) {
+			t.Fatalf("components differ: %d and %d ridges", len(a.ridges.Ridges), len(b.ridges.Ridges))
+		}
+		for i, e := range a.elevation {
+			c, r := i%bigCols, i/bigCols
+			j := ((r+ky)%bigRows)*bigCols + (c+kx)%bigCols
+			if math.Abs(float64(e-b.elevation[j])) > 1 || math.Abs(float64(a.high[i]-b.high[j])) > 1 {
+				t.Fatalf("%d samples, cell (%d, %d): %g, translated %g", samples, c, r, e, b.elevation[j])
+			}
 		}
 	}
 }
@@ -309,6 +311,59 @@ func TestRidgeRecords(t *testing.T) {
 		change(rf)
 		if err := rf.Validate(ff); err == nil {
 			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+// With 4 x 4 samples a cell's elevation is the mean of the surface at its
+// samples, its high their largest, and its relief their spread.
+func TestSubcellSamples(t *testing.T) {
+	b := belt(1, "collision", rng(2000, 2000), structure.Sample{X: 30, Y: 150, WidthKM: 40}, structure.Sample{X: 270, Y: 150, WidthKM: 40},
+		structure.Sample{X: 510, Y: 150, WidthKM: 40})
+	ff := &structure.FeatureFile{Format: structure.FeaturesFormat, Domain: testDom, Features: []structure.Feature{b}}
+	syn := synth(t, 1, nil, 4, testGrid, ff, nil, nil, flat(100))
+	l := structure.NewLine(testDom, b.Backbone)
+	for cell := range testCols * testRows {
+		c, r := cell%testCols, cell/testCols
+		sum, hi, lo, reached := 0.0, math.Inf(-1), math.Inf(1), false
+		for j := range 4 {
+			for k := range 4 {
+				p := structure.Point{X: (float64(4*c+k) + 0.5) * 1.5, Y: (float64(4*r+j) + 0.5) * 1.5}
+				u := l.Cross(p)
+				v := 100 + kernel(u)*1900
+				reached = reached || u < 1
+				sum, hi, lo = sum+v, max(hi, v), min(lo, v)
+			}
+		}
+		e, h, rl := float64(syn.elevation[cell]), float64(syn.high[cell]), float64(syn.relief[cell])
+		if !reached {
+			if e != 100 || h != 100 || rl != 0 {
+				t.Fatalf("cell %d beyond the belt: %g %g %g", cell, e, h, rl)
+			}
+			continue
+		}
+		if !near(e, sum/16) || !near(h, hi) || math.Abs(rl-(hi-lo)) > 1e-2 {
+			t.Fatalf("cell %d: elevation %g high %g relief %g, want %g %g %g", cell, e, h, rl, sum/16, hi, hi-lo)
+		}
+	}
+}
+
+// A peak narrower than the sample spacing still sets its cell's high.
+func TestSubcellPeak(t *testing.T) {
+	bp := DefaultBeltParams()
+	bp.PeakDiameterKM = [2]float64{1, 1}
+	arc := structure.Feature{ID: 1, Type: structure.TypeIslandArc, Key: new(uint64(4)),
+		Backbone: []structure.Sample{{X: 30, Y: 150, WidthKM: 40}, {X: 270, Y: 150, WidthKM: 40}, {X: 510, Y: 150, WidthKM: 40}},
+		Targets:  &structure.Targets{RegionalElevationM: rng(-1000, -1000), ReliefM: rng(2000, 2000)}}
+	ff := &structure.FeatureFile{Format: structure.FeaturesFormat, Domain: testDom, Features: []structure.Feature{arc}}
+	syn := synth(t, 2, &bp, 4, testGrid, ff, nil, nil, flat(-4000))
+	if len(syn.ridges.Peaks) == 0 {
+		t.Fatal("no peaks")
+	}
+	for _, pk := range syn.ridges.Peaks {
+		cell := int(pk.Y/6)*testCols + int(pk.X/6)
+		if h := float64(syn.high[cell]); h < -1000+pk.HeightM-50 {
+			t.Errorf("peak %d of %g m: cell high %g, elevation %g", pk.ID, pk.HeightM, h, syn.elevation[cell])
 		}
 	}
 }

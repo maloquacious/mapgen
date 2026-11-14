@@ -10,14 +10,13 @@ go run ./cmd/terrain --in tmp/trench --png-scale 3 --out tmp/terrain
 ```
 
 The design is in [Terrain Generation Design.md](<../../Terrain Generation Design.md>).
-This covers implementation steps 1 to 3 of that design: the continental foundation, the artifact, the regional surface each feature pulls the foundation toward, and belt components, volcanic peaks, and trench depressions, evaluated at cell centers.
+This covers implementation steps 1 to 4 of that design: the continental foundation, the artifact, the regional surface each feature pulls the foundation toward, belt components, volcanic peaks, and trench depressions, and subcell sampling.
 
 ## Not implemented yet
 
-- Subcell sampling (step 4): `feature_synthesis` is `belts-v1`, evaluated at cell centers, so `high` equals `elevation` and `relief` is 0, and peaks narrower than a cell may fall between centers.
 - Plateau rim roughness and residual detail (step 5).
 - `preview-relief.png` and `preview-change.png`.
-- `--residual`, `--recenter`, `--workers`, and `--config`.
+- `--residual`, `--recenter`, and `--config`.
 
 ## Flags
 
@@ -28,6 +27,7 @@ This covers implementation steps 1 to 3 of that design: the continental foundati
 | `--seed` | Terrain seed, unsigned 64-bit. If omitted, the trench input's seed is used; the manifest records the seed and which of the two it was |
 | `--png` | Write `preview.png` and `preview-structure.png`; default true |
 | `--png-scale` | Sampling interval in cells for the previews; default 1 |
+| `--workers` | Worker goroutines; default one per CPU. Never changes the output |
 | `--version` | Print the generator version |
 
 ## The foundation
@@ -77,11 +77,20 @@ Each trench lowers the seabed along its axis toward its floor, drawn within the 
 It never lowers provisional land.
 The manifest records every value as `belt_parameters`.
 
+## Subcell sampling
+
+Every cell that a feature, ridge, trough, peak, or trench reaches is sampled at 4 x 4 points.
+`elevation` is the mean of the samples, `high` the largest, and `relief` high minus the smallest.
+A ridge crest or volcanic peak narrower than the samples can catch still raises `high` to its crest.
+Other cells keep the foundation at their center, with no relief.
+The work runs in tiles of 64 x 64 cells, in parallel; the result is the same for any number of workers.
+The manifest records the values as `subcell_parameters`.
+
 ## Output
 
 | File | Content |
 | --- | --- |
-| `manifest.json` | Format `mapgen-terrain-v4`, versions, the input trench manifest (which records the structure manifest) and its checksum, seed, grid, datum, parameters, retained records, and checksums |
+| `manifest.json` | Format `mapgen-terrain-v5`, versions, the input trench manifest (which records the structure manifest) and its checksum, seed, grid, datum, parameters, retained records, and checksums |
 | `elevation.f32`, `high.f32`, `relief.f32` | Float32 rasters, row-major, row 0 at the north |
 | `features.json`, `provinces.json`, `provinces.u32`, `provisional-land.u8`, `rock.u8`, `pressure.f32`, `shear.f32`, `igneous.f32`, `rock-noise.f32` | The structure records, byte for byte |
 | `trenches.json` | The trench records, byte for byte |
@@ -94,4 +103,4 @@ The continental affinity fields are not kept; their checksums remain in the reco
 The shift reports what `landmask` would do at the provisional land fraction: the elevation it would move to 0 m, and how many cells would change sides.
 Features move the coast where they raise shallow seabed or lower coastal land.
 
-On the full-size grid (6666 x 3333) a run takes about 13 seconds, with about 2 GB of peak resident memory.
+On the full-size grid (6666 x 3333) a run takes about 16 seconds on 10 cores (about 40 seconds of CPU), with about 2 GB of peak resident memory.

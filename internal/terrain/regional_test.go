@@ -66,7 +66,19 @@ func surface(t *testing.T, seed uint64, f []float32, features ...structure.Featu
 // regional surface alone when bp is nil, and trenches tf.
 func synthesize(t *testing.T, seed uint64, bp *BeltParams, tf *trench.TrenchFile, land []byte, f []float32, ff *structure.FeatureFile) *synthesis {
 	t.Helper()
-	syn, err := regional(t.Context(), seed, DefaultRegionalParams(), bp, testGrid, ff, tf, land, f)
+	return synth(t, seed, bp, 1, testGrid, ff, tf, land, f)
+}
+
+// synth runs feature synthesis with samples x samples points per cell,
+// over a foundation that is f[cell] throughout each cell.
+func synth(t *testing.T, seed uint64, bp *BeltParams, samples int, g continent.Grid, ff *structure.FeatureFile, tf *trench.TrenchFile, land []byte, f []float32) *synthesis {
+	t.Helper()
+	sp := DefaultSubcellParams()
+	sp.Samples = samples
+	syn, err := regional(t.Context(), synthInput{
+		seed: seed, regional: DefaultRegionalParams(), belts: bp, subcell: sp, grid: g, features: ff, trenches: tf, land: land,
+		base: func(_, _ float64, cell int) float64 { return float64(f[cell]) }, center: f, workers: 3,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

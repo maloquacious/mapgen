@@ -248,21 +248,26 @@ As maturity rises, chain amplitude falls toward the bottom of the relief range, 
 Most cells lie under no feature.
 They take the foundation, evaluated once at the cell center, and contribute no relief beyond their residual detail.
 
-A cell intersected by any feature's bounds is sampled at a fixed 4 by 4 grid of subcell points, as section 6 requires.
+A cell that any feature, ridge, trough, peak, or trench reaches at one of its subcell points is sampled at a fixed 4 by 4 grid of subcell points, as section 6 requires.
 At each point the full surface (foundation, regional surface, ridges, depressions) is evaluated.
+At a subcell point the foundation takes the signed coast distance and the shelf narrowing interpolated bilinearly from the cell centers, so the provisional coast falls on cell edges as before.
+A trench reaches only the points of provisional water cells.
 Then:
 
 - `ElevationM` is the mean of the 16 samples;
 - the initial high is the largest sample and the initial valley the smallest;
-- a bounded subcell relief model adds relief for forms narrower than about two cells, which 16 samples cannot resolve: volcanic peaks, narrow ridge crests, and fault scarps add their analytic peak height above the sampled maximum to the high, up to the feature's relief draw;
+- a bounded subcell relief model adds relief for forms narrower than about two cells, which 16 samples cannot resolve: volcanic peaks, narrow ridge crests, and fault scarps add their analytic peak height above the sampled maximum to the high, up to the feature's relief draw.
+  In `subcell-v1`, a ridge whose crest passes within half a sample diagonal of a sample, or a peak centered in the cell, offers its crest height (after corridors and basins); the high gains whatever of the largest such crest exceeds the largest ridge or peak component sampled in the cell.
+  A fault scarp is a step, which the samples on its two sides already span;
 - `HighM` is the high, at least `ElevationM`, and `ReliefM` is high minus valley, at least 0.
 
 `HighM` is a representative high, not a guaranteed maximum over the cell.
 Drainage recomputes relief later against the final valley floor.
 
-A cell's bounds test uses each feature's `Bounds()`, expanded for ridges, trenches, and kernels that reach past the envelope.
-A coarse spatial index, features binned by bounds on the working grid, finds the candidate features for each cell.
-Features are always visited in ascending ID order, and every per-cell result depends only on that cell, so the output does not depend on the number of workers or on tile order.
+The work is divided into tiles of 64 by 64 cells.
+A spatial index bins every feature, trough, ridge, peak, and trench by its bounds into the tiles its cells reach, and a tile visits only those, rasterizing each linear one on the tile's subcell points alone.
+Features are always visited in ascending ID order, and every per-cell result depends only on that cell, so the output does not depend on the number of workers or on tile order; a test compares one worker with eight byte for byte.
+The feature diagnostics are still measured at cell centers.
 
 ## Residual detail
 
@@ -294,11 +299,11 @@ The order of draws within each stream is part of `terrain-v1`; changing it chang
 
 ## Saved artifact
 
-The format is `mapgen-terrain-v4`; v2 read a trench checkpoint instead of a structure checkpoint, v3 added the regional surface, and v4 adds belt components, peaks, trench depressions, and `ridges.json`.
+The format is `mapgen-terrain-v5`; v2 read a trench checkpoint instead of a structure checkpoint, v3 added the regional surface, v4 belt components, peaks, trench depressions, and `ridges.json`, and v5 subcell sampling with real high and relief.
 
 | Content | Purpose |
 | --- | --- |
-| `manifest.json` | Format and generator versions, input trench manifest (which records the structure manifest) and its checksum, seed, grid, resolved parameters (`foundation-v2`, `regional-v1`, and later `belts-v1`, `subcell-v1`, `residual-v1`), how far feature synthesis goes (`feature_synthesis`), residual on or off, recentering, and checksums for every saved file |
+| `manifest.json` | Format and generator versions, input trench manifest (which records the structure manifest) and its checksum, seed, grid, resolved parameters (`foundation-v2`, `regional-v1`, `belts-v1`, `subcell-v1`, and later `residual-v1`), how far feature synthesis goes (`feature_synthesis`), residual on or off, recentering, and checksums for every saved file |
 | `elevation.f32` | `ElevationM`: mean solid surface elevation, m, relative to the provisional datum |
 | `high.f32` | `HighM`: representative high, m, at least `ElevationM` |
 | `relief.f32` | `ReliefM`: representative high minus valley, m, at least 0 |
@@ -385,7 +390,7 @@ The terrain-mode artifact carries the clamped elevation, high, and relief fields
 3. **Belt components.** Done.
    Ridge chains, branches, longitudinal basins, corridors and saddles, volcanic peaks, the trench depressions from the trench records, and `ridges.json`.
    Still evaluated at cell centers, so peaks narrower than a cell may fall between centers until step 4.
-4. **Subcell rasterization.**
+4. **Subcell rasterization.** Done.
    The 4 by 4 sampling, high and relief, the subcell relief model, the spatial index, and parallel tiles with the worker-count test.
 5. **Residual detail** with its bounds tests.
 6. **Recentering.**

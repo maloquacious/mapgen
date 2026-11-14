@@ -5,15 +5,11 @@ package terrain
 
 import (
 	"cmp"
-	"context"
-	"fmt"
 	"math"
 	"slices"
 
 	"github.com/maloquacious/mapgen/internal/continent"
-	"github.com/maloquacious/mapgen/internal/prng"
 	"github.com/maloquacious/mapgen/internal/structure"
-	"github.com/maloquacious/mapgen/internal/trench"
 )
 
 // Belt components: ridge chains, branches, longitudinal troughs, corridors
@@ -538,66 +534,6 @@ func segmentDistance(dom structure.Domain, p structure.Point, a, b structure.Sam
 	return math.Hypot(qx-t*ex, qy-t*ey)
 }
 
-// rasterize combines ridges and peaks by maximum into ridge. Along a
-// corridor every ridge of its belt is lowered by the corridor's saddle
-// share, weighted by the kernel across the corridor; over a basin ridges
-// and peaks fade out with the basin's weight.
-func (c *components) rasterize(ctx context.Context, dom structure.Domain, g continent.Grid, basin []uint8, ridge []float32) error {
-	cols, rows := g.Columns, g.Rows
-	byFeature := map[uint32][]int{}
-	for i, cr := range c.file.Corridors {
-		byFeature[cr.Feature] = append(byFeature[cr.Feature], i)
-	}
-	put := func(cell int, v float64) {
-		if b := basin[cell]; b > 0 {
-			v *= 1 - float64(b)/255
-		}
-		ridge[cell] = max(ridge[cell], float32(v))
-	}
-	for i := range c.file.Ridges {
-		rec := &c.file.Ridges[i]
-		r := ridgeShape{rec: rec, amp: c.amps[i], cum: make([]float64, len(rec.Backbone)), fade: c.fades[i]}
-		for j := 1; j < len(rec.Backbone); j++ {
-			a, b := rec.Backbone[j-1], rec.Backbone[j]
-			r.cum[j] = r.cum[j-1] + math.Hypot(b.X-a.X, b.Y-a.Y)
-		}
-		cors := byFeature[rec.Feature]
-		err := structure.LineCells(ctx, dom, cols, rows, rec.Backbone, 1, func(cell int, u, s float64) {
-			if u >= 1 {
-				return
-			}
-			v := r.ampAt(s) * kernel(u) * r.along(s)
-			if v <= 0 {
-				return
-			}
-			pt := structure.Point{X: (float64(cell%cols) + 0.5) * g.CellWidthKM, Y: (float64(cell/cols) + 0.5) * g.CellHeightKM}
-			low := 0.0
-			for _, k := range cors {
-				cr := &c.file.Corridors[k]
-				a, b := cr.Backbone[0], cr.Backbone[1]
-				low = max(low, cr.SaddleShare*kernel(segmentDistance(dom, pt, a, b)/(a.WidthKM/2)))
-			}
-			put(cell, v*(1-low))
-		})
-		if err != nil {
-			return err
-		}
-	}
-	for _, pk := range c.file.Peaks {
-		r := pk.RadiusKM
-		structure.Visit(dom, cols, rows, structure.Rect{MinX: pk.X - r, MinY: pk.Y - r, MaxX: pk.X + r, MaxY: pk.Y + r}, func(col, row int, pt structure.Point) {
-			dx := pt.X - pk.X
-			dx -= math.Round(dx/dom.WidthKM) * dom.WidthKM
-			dy := pt.Y - pk.Y
-			dy -= math.Round(dy/dom.HeightKM) * dom.HeightKM
-			if d := math.Hypot(dx, dy); d < r {
-				put(row*cols+col, pk.HeightM*kernel(d/r))
-			}
-		})
-	}
-	return ctx.Err()
-}
-
 // saddles records where each corridor crosses each ridge of its belt, with
 // the surface elevation of the cell there.
 func (c *components) saddles(dom structure.Domain, g continent.Grid, elev []float32) {
@@ -648,45 +584,4 @@ type TrenchDiagnostics struct {
 	Parent uint32      `json:"parent"`
 	FloorM *[2]float64 `json:"floor_m"`
 	Axis   Stats       `json:"axis"`
-}
-
-// trenchDepressions lowers the surface along each trench toward its floor,
-// drawn as control samples along its backbone from the trench's stream,
-// deepest on the axis, easing to the surface at the edge of its width and
-// over its end fades. It never lowers provisional land.
-func trenchDepressions(ctx context.Context, seed uint64, p BeltParams, spacing [2]float64, dom structure.Domain, g continent.Grid, tf *trench.TrenchFile, land []byte, elev []float32) ([]TrenchDiagnostics, error) {
-	if tf == nil {
-		return nil, nil
-	}
-	out := make([]TrenchDiagnostics, 0, len(tf.Trenches))
-	for _, tr := range tf.Trenches {
-		if tr.Targets.RegionalElevationM == nil || tr.Key == nil {
-			return nil, fmt.Errorf("trench %d has no floor target or key", tr.ID)
-		}
-		rng := prng.New(seed, DomainTrench, *tr.Key)
-		l := structure.NewLine(dom, tr.Backbone).Length()
-		n := max(1, int(math.Round(l/lerp(spacing, rng.Float64()))))
-		pl := &plan{step: l / float64(n)}
-		for range n + 1 {
-			pl.regional = append(pl.regional, lerp(*tr.Targets.RegionalElevationM, rng.Float64()))
-		}
-		fade := min(p.TrenchFadeKM, l/3)
-		var axis []int32
-		err := structure.LineCells(ctx, dom, g.Columns, g.Rows, tr.Backbone, 1, func(cell int, u, s float64) {
-			if u >= 1 || land != nil && land[cell] == 1 {
-				return
-			}
-			k := kernel(u)
-			w := k * min(smoothstep(0, fade, s), smoothstep(0, fade, l-s))
-			elev[cell] -= float32(w * max(0, float64(elev[cell])-pl.at(pl.regional, s)))
-			if k >= 0.9 {
-				axis = append(axis, int32(cell))
-			}
-		})
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, TrenchDiagnostics{ID: tr.ID, Parent: tr.Parent, FloorM: span(pl.regional), Axis: cellStats(elev, axis)})
-	}
-	return out, nil
 }

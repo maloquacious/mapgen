@@ -136,23 +136,37 @@ func TestFoundationKeepsProvisionalCoast(t *testing.T) {
 			reach[k] = reach[k] || in
 		}
 	}
-	changed := 0
+	// A cell is sampled within, so a feature may reach it without reaching
+	// its center: widen the reach by one cell.
+	near := make([]bool, len(reach))
+	for k := range reach {
+		c, r := k%g.Columns, k/g.Columns
+		for dy := -1; dy <= 1; dy++ {
+			for dx := -1; dx <= 1; dx++ {
+				near[k] = near[k] || reach[((r+dy+g.Rows)%g.Rows)*g.Columns+(c+dx+g.Columns)%g.Columns]
+			}
+		}
+	}
+	changed, rugged := 0, 0
 	for i, e := range fd {
 		if (e > 0) != (land[i] == 1) || e == 0 {
 			t.Fatalf("cell %d: foundation %g, provisional land %d", i, e, land[i])
 		}
-		if r.High[i] != r.Elevation[i] || r.Relief[i] != 0 {
-			t.Fatalf("cell %d: high %g, relief %g", i, r.High[i], r.Relief[i])
+		if r.High[i] < r.Elevation[i] || r.Relief[i] < 0 {
+			t.Fatalf("cell %d: elevation %g, high %g, relief %g", i, r.Elevation[i], r.High[i], r.Relief[i])
 		}
-		if r.Elevation[i] != e {
+		if r.Relief[i] > 0 {
+			rugged++
+		}
+		if r.Elevation[i] != e || r.Relief[i] != 0 || r.High[i] != e {
 			changed++
-			if !reach[i] {
+			if !near[i] {
 				t.Fatalf("cell %d beyond every envelope changed from %g to %g", i, e, r.Elevation[i])
 			}
 		}
 	}
-	if changed == 0 {
-		t.Error("the features changed nothing")
+	if changed == 0 || rugged == 0 {
+		t.Errorf("the features changed %d cells, %d with relief", changed, rugged)
 	}
 	d := r.Diagnostics
 	if d.Shift.LandCells != r.Manifest.ProvisionalLandCells {
@@ -269,6 +283,24 @@ func TestArtifactRoundTrip(t *testing.T) {
 	// An existing output is never replaced.
 	if err := terrain.Write(t.Context(), out, r, 0); err == nil {
 		t.Error("replaced an existing output")
+	}
+}
+
+// The number of workers never changes the output.
+func TestWorkers(t *testing.T) {
+	in := inputDir(t)
+	var want map[string]string
+	for _, w := range []int{1, 8} {
+		r, err := terrain.Generate(t.Context(), terrain.Options{In: in, Workers: w, Version: "test"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := files(t, write(t, r))
+		if want == nil {
+			want = got
+			continue
+		}
+		sameFiles(t, want, got)
 	}
 }
 

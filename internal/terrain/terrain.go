@@ -30,6 +30,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 
 	"github.com/maloquacious/mapgen/internal/artifact"
@@ -41,7 +42,7 @@ import (
 )
 
 const (
-	Format          = "mapgen-terrain-v4"
+	Format          = "mapgen-terrain-v5"
 	Topology        = "torus: x and y wrap; the map may be recentered until climate"
 	Datum           = "provisional: 0 m is the provisional coast of the structure records, not sea level"
 	SeedExplicit    = "explicit"
@@ -96,10 +97,10 @@ type Manifest struct {
 	FoundationParameters    FoundationParams `json:"foundation_parameters"`
 	RegionalParameters      RegionalParams   `json:"regional_parameters"`
 	BeltParameters          BeltParams       `json:"belt_parameters"`
-	// FeatureSynthesis names how far features are synthesized. With
-	// BeltAlgorithm the surface is the regional surface with belt
-	// components, peaks, and trenches, evaluated at cell centers without
-	// subcell sampling, so HighM equals ElevationM and ReliefM is 0.
+	SubcellParameters       SubcellParams    `json:"subcell_parameters"`
+	// FeatureSynthesis names how far features are synthesized:
+	// SubcellAlgorithm, the regional surface with belt components, peaks,
+	// and trenches, sampled within each cell they reach.
 	FeatureSynthesis string `json:"feature_synthesis"`
 	Ridges           File   `json:"ridges"`
 	// Retained lists the structure and trench records copied unchanged, as
@@ -190,6 +191,7 @@ type Result struct {
 // Options are the inputs to Generate.
 type Options struct {
 	In      string  // trench artifact directory
+	Workers int     // worker goroutines; 0 for one per CPU. Never affects the output
 	Seed    *uint64 // terrain seed; nil uses the trench seed
 	Version string  // generator version
 }
@@ -224,7 +226,7 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 		seed, source = *o.Seed, SeedExplicit
 	}
 	g := sm.Grid
-	p, rp, bp := DefaultFoundationParams(), DefaultRegionalParams(), DefaultBeltParams()
+	p, rp, bp, sp := DefaultFoundationParams(), DefaultRegionalParams(), DefaultBeltParams(), DefaultSubcellParams()
 	r := &Result{
 		Manifest: Manifest{
 			Format: Format, GeneratorVersion: o.Version,
@@ -232,7 +234,7 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 			Seed:  seed, SeedSource: source, SeedDerivation: prng.DerivationVersion, PRNG: prng.Algorithm,
 			Grid: g, Topology: Topology, Datum: Datum,
 			ProvisionalLandFraction: sm.ProvisionalLandFraction, ProvisionalLandCells: sm.ProvisionalLandCells,
-			FoundationParameters: p, RegionalParameters: rp, BeltParameters: bp, FeatureSynthesis: BeltAlgorithm, Retained: tm.Records(),
+			FoundationParameters: p, RegionalParameters: rp, BeltParameters: bp, SubcellParameters: sp, FeatureSynthesis: SubcellAlgorithm, Retained: tm.Records(),
 		},
 		Structure: s, Trenches: tr.Trenches, records: records,
 	}
@@ -251,14 +253,29 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 	if r.foundation, err = fd.elevation(ctx, p, g, dist, narrow); err != nil {
 		return nil, err
 	}
-	syn, err := regional(ctx, seed, rp, &bp, g, s.Features, tr.Trenches, s.Land, r.foundation)
+	// At a subcell point the foundation takes the coast distance and shelf
+	// narrowing interpolated from cell centers.
+	base := func(x, y float64, _ int) float64 {
+		d := bilinear(dist, g.Columns, g.Rows, g.CellWidthKM, g.CellHeightKM, x, y)
+		n := 0.0
+		if narrow != nil {
+			n = bilinear(narrow, g.Columns, g.Rows, g.CellWidthKM, g.CellHeightKM, x, y)
+		}
+		return fd.at(p, x, y, d, n)
+	}
+	workers := o.Workers
+	if workers < 1 {
+		workers = runtime.NumCPU()
+	}
+	syn, err := regional(ctx, synthInput{
+		seed: seed, regional: rp, belts: &bp, subcell: sp, grid: g, features: s.Features, trenches: tr.Trenches, land: s.Land,
+		base: base, center: r.foundation, workers: workers,
+	})
 	if err != nil {
 		return nil, err
 	}
-	r.Elevation, r.Ridges = syn.elevation, syn.ridges
+	r.Elevation, r.High, r.Relief, r.Ridges = syn.elevation, syn.high, syn.relief, syn.ridges
 	r.Diagnostics.Features, r.Diagnostics.Trenches, r.Diagnostics.Ridges = syn.features, syn.trenches, syn.ridges.count()
-	r.High = slices.Clone(r.Elevation)
-	r.Relief = make([]float32, len(r.Elevation))
 	r.diagnose()
 	return r, ctx.Err()
 }
@@ -439,7 +456,7 @@ func Load(ctx context.Context, dir string) (*Result, error) {
 	if m.Format != Format {
 		return nil, fmt.Errorf("unsupported terrain format %q", m.Format)
 	}
-	if m.FeatureSynthesis != BeltAlgorithm {
+	if m.FeatureSynthesis != SubcellAlgorithm {
 		return nil, fmt.Errorf("unsupported feature synthesis %q", m.FeatureSynthesis)
 	}
 	tm := m.Input.Manifest

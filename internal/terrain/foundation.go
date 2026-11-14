@@ -240,22 +240,42 @@ func (fd *foundation) elevation(ctx context.Context, p FoundationParams, g conti
 				return nil, err
 			}
 		}
-		x, y := (float64(i%g.Columns)+0.5)*g.CellWidthKM, (float64(i/g.Columns)+0.5)*g.CellHeightKM
-		at := func(k int) float64 { return fd.fields[k].SampleTorus(x, y) }
-		var e float64
-		if d > 0 {
-			b := fd.base.SampleTorus(x, y) * (1 + p.VariationShare*(2*at(fieldVariation)-1))
-			e = LandProfile(p, b, float64(d))
-		} else {
-			w := lerp(p.ShelfWidthKM, at(fieldShelfWidth))
-			if narrow != nil && w > p.NarrowShelfKM {
-				w -= (w - p.NarrowShelfKM) * float64(narrow[i])
-			}
-			e = WaterProfile(p, lerp(p.ShelfDepthM, at(fieldShelfDepth)), w, lerp(p.AbyssalDepthM, at(fieldAbyssalDepth)), -float64(d))
+		n := 0.0
+		if narrow != nil {
+			n = float64(narrow[i])
 		}
-		out[i] = float32(e)
+		out[i] = float32(fd.at(p, (float64(i%g.Columns)+0.5)*g.CellWidthKM, (float64(i/g.Columns)+0.5)*g.CellHeightKM, float64(d), n))
 	}
 	return out, nil
+}
+
+// at returns the foundation elevation at (x, y) km, with signed coast
+// distance d km and shelf narrowing n.
+func (fd *foundation) at(p FoundationParams, x, y, d, n float64) float64 {
+	field := func(k int) float64 { return fd.fields[k].SampleTorus(x, y) }
+	if d > 0 {
+		b := fd.base.SampleTorus(x, y) * (1 + p.VariationShare*(2*field(fieldVariation)-1))
+		return LandProfile(p, b, d)
+	}
+	w := lerp(p.ShelfWidthKM, field(fieldShelfWidth))
+	if w > p.NarrowShelfKM {
+		w -= (w - p.NarrowShelfKM) * n
+	}
+	return WaterProfile(p, lerp(p.ShelfDepthM, field(fieldShelfDepth)), w, lerp(p.AbyssalDepthM, field(fieldAbyssalDepth)), -d)
+}
+
+// bilinear samples a cell-centered cols x rows raster at (x, y) km on the
+// torus, with cells cw x ch km.
+func bilinear(v []float32, cols, rows int, cw, ch, x, y float64) float64 {
+	gx, gy := x/cw-0.5, y/ch-0.5
+	x0, y0 := math.Floor(gx), math.Floor(gy)
+	tx, ty := gx-x0, gy-y0
+	mod := func(a, n int) int { return (a%n + n) % n }
+	c0, r0 := mod(int(x0), cols), mod(int(y0), rows)
+	c1, r1 := (c0+1)%cols, (r0+1)%rows
+	a := float64(v[r0*cols+c0])*(1-tx) + float64(v[r0*cols+c1])*tx
+	b := float64(v[r1*cols+c0])*(1-tx) + float64(v[r1*cols+c1])*tx
+	return a*(1-ty) + b*ty
 }
 
 // smoothField builds smooth field k, normalized to [0,1] by its extremes. A
