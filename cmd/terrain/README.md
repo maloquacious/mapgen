@@ -14,11 +14,6 @@ The design is in [Terrain Generation Design.md](<../../Terrain Generation Design
 This covers implementation steps 1 to 6 of that design: the continental foundation, the artifact, the regional surface each feature pulls the foundation toward, belt components, volcanic peaks, and trench depressions, subcell sampling, residual detail, and recentering.
 Step 7, freezing the coastline, is `landmask`'s terrain-input mode; see [its README](../landmask/README.md).
 
-## Not implemented yet
-
-- `preview-relief.png` and `preview-change.png`.
-- `--config`.
-
 ## Flags
 
 | Flag | Meaning |
@@ -26,12 +21,21 @@ Step 7, freezing the coastline, is `landmask`'s terrain-input mode; see [its REA
 | `--in` | Trench artifact directory; default `tmp/trench` |
 | `--out` | New output directory; default `tmp/terrain`. An existing one is never replaced |
 | `--seed` | Terrain seed, unsigned 64-bit. If omitted, the trench input's seed is used; the manifest records the seed and which of the two it was |
-| `--png` | Write `preview.png` and `preview-structure.png`; default true |
+| `--config` | Calibration file overriding default parameters; see "Configuration" |
+| `--print-config` | Print the default calibration as a configuration file and exit |
+| `--png` | Write `preview.png`, `preview-structure.png`, `preview-relief.png`, and `preview-change.png`; default true |
 | `--png-scale` | Sampling interval in cells for the previews; default 1 |
 | `--recenter` | Translate the complete result, structure and trench records included, to center the largest landmass terrain implies at the provisional fraction; off by default |
 | `--residual` | Add residual detail; default true. `--residual=false` publishes the structured surface alone |
 | `--workers` | Worker goroutines; default one per CPU. Never changes the output |
 | `--version` | Print the generator version |
+
+## Configuration
+
+`--config` reads a calibration file in format `mapgen-terrain-config-v1`: the format, and any of the sections `foundation`, `regional`, `belts`, `subcell`, and `residual`, each naming only the values it changes; map entries merge by key.
+`--print-config` prints the defaults as such a file, a starting point to edit.
+A configuration changes values, not algorithms: algorithm names and descriptions cannot change, maps keep the default keys, every number stays finite with its default's sign (zero allowed), every pair keeps its order, values the algorithms divide or count by stay positive, and shares stay at most 1; anything else is refused with the name of the value.
+The resolved values are recorded in the manifest as the `*_parameters`, so the artifact alone says how it was made; the file's path is not recorded.
 
 ## The foundation
 
@@ -47,7 +51,7 @@ A smooth field varies the base level by ±15 percent.
 Water falls through a shelf (50–200 m deep, 50–200 km wide), a 150 km slope, and an abyssal plain (3,500–5,500 m), each range spanned by its own smooth field.
 Each segment eases into the next.
 Within 1.5 half widths of an active margin's or island arc's backbone the shelf narrows to 50 km, easing back to its own width at 3 half widths.
-Small enclosed waters get the same profile, so they are shallow pits.
+The provisional ocean is one connected body, as structure selects it, so no water is enclosed by land.
 
 The manifest records every value as `foundation_parameters`.
 
@@ -118,6 +122,8 @@ The moved records are described as a trench manifest recentered by the combined 
 | `diagnostics.json` | Elevation and relief statistics on provisional land and water, the shift at the provisional fraction, for each feature its drawn targets and the elevation of its core (the cells where its weight is at least 0.9; a rift's shoulders), counts of the ridge records, and for each trench its drawn floor and axis elevation |
 | `preview.png` | Hypsometric tint with hill shading, and the coast at the provisional fraction as a line |
 | `preview-structure.png` | The same tint without shading, each feature's envelope outline, every backbone, trench backbones in red, ridge chains in white, branches in grey, troughs in blue, corridors in cyan, and volcanic peaks as red dots |
+| `preview-relief.png` | `ReliefM` in eight bands, from cream under 50 m through 150, 300, 600, 1000, 2000, and 3500 m to near-black above, with the same coast line |
+| `preview-change.png` | The provisional mask against the land at the provisional fraction: unchanged land green, unchanged water blue, cells terrain raised from water to land orange, and cells it lowered from land to water purple |
 
 The continental affinity fields are not kept; their checksums remain in the recorded input manifest chain.
 The shift reports what `landmask` would do at the provisional land fraction: the elevation it would move to 0 m, which `landmask` records as `sea_level_m`, and how many cells would change sides.

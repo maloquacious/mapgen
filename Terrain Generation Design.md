@@ -59,10 +59,16 @@ go run ./cmd/terrain \
 | `--recenter` | Translate the complete result; off by default |
 | `--png` | Generate previews; default true |
 | `--png-scale` | Sampling interval for previews; default 1 |
+| `--config` | Calibration file, `mapgen-terrain-config-v1`, overriding default parameters |
+| `--print-config` | Print the default calibration as a configuration file |
 | `--workers` | Number of worker goroutines; default the number of CPUs. Never affects the output |
 | `--version` | Print the generator version |
 
-`--config` is deferred, as it is for structure.
+`--config` reads a calibration file in format `mapgen-terrain-config-v1`: the format, and any of the sections `foundation`, `regional`, `belts`, `subcell`, and `residual`, each naming only the values it changes; map entries merge by key.
+`--print-config` prints the defaults as such a file, a starting point to edit.
+A configuration changes values, not algorithms: algorithm names and descriptions cannot change, maps keep the default keys, every number stays finite with its default's sign (zero allowed), every pair keeps its order, values the algorithms divide or count by stay positive, and shares stay at most 1; anything else is refused with the name of the value.
+The resolved values are recorded in the manifest as the `*_parameters`, so the artifact alone says how it was made; the file's path is not recorded.
+Structure's `--config` is still deferred.
 There is no fixture flag: structure's `--features` already supplies fixed features, and terrain reads them, with the trenches, from the trench artifact.
 
 ## Inputs and physical domain
@@ -401,7 +407,7 @@ The specification's retry over continental attempts does not fit a staged pipeli
 A layout that fails steps 3 or 4 is an error that names the measure, and the user varies the terrain or structure seed.
 The terrain-mode artifact carries the clamped elevation, high, and relief fields with the frozen ocean mask, and its manifest identifies the input kind (`terrain`) and the selection algorithm, distinct from the affinity mode, which remains available for inspection.
 
-Implemented as `landmask` format `mapgen-landmask-terrain-v1`, selection `ocean-v1`; see `cmd/landmask/README.md`.
+Implemented as `landmask` format `mapgen-landmask-terrain-v2`, selection `ocean-v1`; see `cmd/landmask/README.md`.
 
 - The command reads the input's manifest format and chooses the mode; without `--land-fraction`, terrain input uses its provisional land fraction.
 - Sea level is the level terrain's diagnostics report as the shift, midway between the lowest land and the highest water of the quantile, so the two always agree.
@@ -410,7 +416,7 @@ Implemented as `landmask` format `mapgen-landmask-terrain-v1`, selection `ocean-
 - Clamping moves high with elevation, so relief is unchanged.
   Non-ocean cells at or below sea level before clamping are counted as depressions, where drainage may place lakes; the rest is dry land.
 - The artifact retains the structure and trench records and `ridges.json` unchanged; ridge and saddle elevations stay relative to the provisional datum, and the manifest's `sea_level_m` converts them.
-- `--recenter` is not available for terrain input: recenter with `terrain --recenter`, which centers the land terrain implies.
+- `--recenter` centers the largest landmass of the frozen mask, moving the records exactly as terrain's recentering does (`terrain.MoveRecords`), and is checked on load the same way.
 
 On the full-size seed 42 map sea level is 0.11 m below the provisional datum, the repair is 6,940 cells (0.031 percent) from 126 quantile ocean components, 3,470 cells are depressions, and the largest clamp raises a rift floor by 301 m.
 It runs in about 7 seconds with a peak of 1.7 GB.

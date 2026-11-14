@@ -23,7 +23,7 @@ The input is unchanged. Output must be a new directory, and an existing one is n
 | `--in` | Terrain or continental artifact directory; default `tmp/terrain` |
 | `--out` | New output directory; default `tmp/landmask`. An existing one is never replaced |
 | `--land-fraction` | Fraction of cells selected as land (non-ocean), from 0 through 1. For terrain input, default the terrain's provisional land fraction; for continental input, default 0.325 |
-| `--recenter` | Continental input only: center the largest selected landmass; default false. For terrain input, recenter with `terrain --recenter` |
+| `--recenter` | Center the largest selected landmass, translating the mask with every field and, for terrain input, every record; default false |
 | `--png` | Write `preview.png`; default true |
 | `--png-scale` | Sampling interval in cells for the preview; default 1 |
 | `--version` | Print the generator version |
@@ -49,8 +49,10 @@ The artifact is self-contained; later stages load it with `internal/landmask.Loa
 - `elevation.f32`, `high.f32`, `relief.f32`: terrain's fields relative to sea level, clamped.
 - The structure and trench records and `ridges.json`, copied unchanged from the terrain input. Ridge and saddle elevations stay relative to terrain's provisional datum; `sea_level_m` converts them.
 - `diagnostics.json`: ocean, non-ocean, depression, and dry land cells and fractions; the quantile ocean's components and the largest; the repair; the cells raised and lowered by the clamp, with the largest and mean change; and the cells that changed sides of the provisional coast. Depressions are non-ocean cells at or below sea level before clamping, where drainage may place lakes; the rest is dry land.
-- `manifest.json`: format `mapgen-landmask-terrain-v1`, input kind `terrain`, the input terrain manifest and its checksum, the grid, requested and actual fraction, the selection and its limits (`ocean-v1`), `sea_level_m`, `repair_fraction`, and checksums for every saved file.
+- `manifest.json`: format `mapgen-landmask-terrain-v2` (v1 had no recentering), input kind `terrain`, the input terrain manifest and its checksum, the grid, requested and actual fraction, the selection and its limits (`ocean-v1`), `sea_level_m`, `repair_fraction`, the recentering and any recentered records manifest, and checksums for every saved file.
 - `preview.png`: a hypsometric tint with hill shading relative to sea level, the frozen coast drawn as a line.
+
+`--recenter` translates the finished selection by whole cells to center the largest eight-connected landmass of the frozen mask; nothing is reselected, so the counts, sea level, and diagnostics are those of the unrecentered result. The structure and trench records and `ridges.json` move with it, exactly as `terrain --recenter` moves them, and the manifest adds `recentered_records`: the records' trench manifest as if the trench stage had recentered by the combined shift, which Load verifies with the usual trench and structure checks. The `recentering` record is always present and gives this stage's shift relative to its terrain input. On the full-size seed 42 map the shift is (103, 187) cells.
 
 Load verifies every checksum, the retained records, the count, that the ocean is one connected component, and that every cell lies on its side of the frozen coast.
 

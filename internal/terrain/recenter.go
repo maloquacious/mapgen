@@ -9,7 +9,10 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 
+	"github.com/maloquacious/mapgen/internal/continent"
 	"github.com/maloquacious/mapgen/internal/fracture"
 	"github.com/maloquacious/mapgen/internal/structure"
 	"github.com/maloquacious/mapgen/internal/trench"
@@ -41,38 +44,69 @@ func recenter(ctx context.Context, r *Result) error {
 	if c.X == 0 && c.Y == 0 {
 		return nil
 	}
-	if err := r.Structure.RecenterBy(ctx, step); err != nil {
+	tm, err := MoveRecords(ctx, r.Structure, r.Trenches, r.Ridges, r.Manifest.Input.Manifest, step)
+	if err != nil {
 		return err
-	}
-	dx, dy := step.ShiftXKM, step.ShiftYKM
-	r.Trenches.Translate(dx, dy)
-	if err := r.Trenches.Validate(r.Structure.Features); err != nil {
-		return fmt.Errorf("recenter: %w", err)
-	}
-	r.Ridges.translate(dx, dy)
-	if err := r.Ridges.Validate(r.Structure.Features); err != nil {
-		return fmt.Errorf("recenter: %w", err)
 	}
 	for _, v := range [][]float32{r.Elevation, r.High, r.Relief, r.foundation} {
 		if v != nil {
 			structure.Rotate(v, g.Columns, g.Rows, c.X, c.Y)
 		}
 	}
+	// Write saves the moved records and fills in their files and checksums.
+	r.Manifest.RecenteredRecords, r.source = &tm, ""
+	return ctx.Err()
+}
 
-	// The moved records are described as the trench stage would have
-	// described them had it recentered by the combined shift. Write saves
-	// them and fills in their files and checksums.
-	tm := r.Manifest.Input.Manifest
+// MoveRecords translates retained structure, trench, and ridge records by
+// a later stage's recentering step, and returns the trench manifest that
+// describes them: base, the manifest that described them before, as the
+// trench stage would have written it had it recentered by the combined
+// shift, its own recentered_records the moved structure manifest.
+// WriteMovedRecords saves them and fills in their files and checksums.
+func MoveRecords(ctx context.Context, s *structure.Result, tf *trench.TrenchFile, rf *RidgeFile, base trench.Manifest, step structure.Recentering) (trench.Manifest, error) {
+	if err := s.RecenterBy(ctx, step); err != nil {
+		return trench.Manifest{}, err
+	}
+	dx, dy := step.ShiftXKM, step.ShiftYKM
+	tf.Translate(dx, dy)
+	if err := tf.Validate(s.Features); err != nil {
+		return trench.Manifest{}, fmt.Errorf("recenter: %w", err)
+	}
+	rf.Translate(dx, dy)
+	if err := rf.Validate(s.Features); err != nil {
+		return trench.Manifest{}, fmt.Errorf("recenter: %w", err)
+	}
+	g := base.Grid
+	tm := base
 	acc := step
 	if prev := tm.Recentering; prev.Applied {
 		acc.ShiftX, acc.ShiftY = (prev.ShiftX+step.ShiftX)%g.Columns, (prev.ShiftY+step.ShiftY)%g.Rows
 		acc.ShiftXKM, acc.ShiftYKM = float64(acc.ShiftX)*g.CellWidthKM, float64(acc.ShiftY)*g.CellHeightKM
 	}
 	tm.Recentering = acc
-	sm := r.Structure.Manifest
+	sm := s.Manifest
 	tm.RecenteredRecords = &sm
-	r.Manifest.RecenteredRecords, r.source = &tm, ""
-	return ctx.Err()
+	return tm, ctx.Err()
+}
+
+// WriteMovedRecords writes moved structure and trench records to dir and
+// returns tm, from MoveRecords, with their files and checksums.
+func WriteMovedRecords(dir string, s *structure.Result, tf *trench.TrenchFile, tm trench.Manifest) (trench.Manifest, error) {
+	rm, err := structure.WriteRecords(dir, s)
+	if err != nil {
+		return tm, err
+	}
+	tdata, err := tf.Marshal()
+	if err != nil {
+		return tm, err
+	}
+	if err := os.WriteFile(filepath.Join(dir, trench.TrenchesFile), tdata, 0o644); err != nil {
+		return tm, err
+	}
+	tm.RecenteredRecords, tm.Retained = &rm, rm.Records()
+	tm.Trenches.SHA256 = checksum(tdata)
+	return tm, nil
 }
 
 // wraps returns the whole number of periods k such that v - k*period lies in
@@ -88,8 +122,10 @@ func wraps(v, period float64) float64 {
 	return k
 }
 
-// translate moves every record by (dx, dy) km.
-func (rf *RidgeFile) translate(dx, dy float64) {
+// Translate moves every record by (dx, dy) km, each backbone then
+// renormalized so its first vertex is in the base domain, and each point
+// into the base domain.
+func (rf *RidgeFile) Translate(dx, dy float64) {
 	dom := rf.Domain
 	line := func(b []structure.Sample) {
 		kx := wraps(b[0].X+dx, dom.WidthKM) * dom.WidthKM
@@ -145,12 +181,19 @@ func (m *Manifest) checkRecentering() error {
 	if !moved {
 		return nil
 	}
-	g := m.Grid
+	return CheckMovedRecords(m.Grid, m.Input.Manifest, *m.RecenteredRecords, c)
+}
+
+// CheckMovedRecords verifies that got describes base's records moved by a
+// later stage's recentering step c, as MoveRecords describes them: c is a
+// whole-cell shift, got's recentering accumulates base's and c, and got
+// differs from base in nothing else but the record files.
+func CheckMovedRecords(g continent.Grid, base, got trench.Manifest, c structure.Recentering) error {
 	if c.ShiftX < 0 || c.ShiftX >= g.Columns || c.ShiftY < 0 || c.ShiftY >= g.Rows ||
 		c.ShiftXKM != float64(c.ShiftX)*g.CellWidthKM || c.ShiftYKM != float64(c.ShiftY)*g.CellHeightKM {
 		return fmt.Errorf("invalid recentering shift (%d, %d)", c.ShiftX, c.ShiftY)
 	}
-	in, got := m.Input.Manifest, *m.RecenteredRecords
+	in := base
 	want := c
 	if p := in.Recentering; p.Applied {
 		want.ShiftX, want.ShiftY = (p.ShiftX+c.ShiftX)%g.Columns, (p.ShiftY+c.ShiftY)%g.Rows

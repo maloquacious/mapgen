@@ -9,6 +9,8 @@ package main
 
 import (
 	"context"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"flag"
 	"fmt"
@@ -44,6 +46,8 @@ func run(ctx context.Context, args []string) error {
 	recenterFlag := fs.Bool("recenter", false, "translate the complete result to center the largest landmass terrain implies")
 	residual := fs.Bool("residual", true, "add residual detail; false publishes the structured surface alone")
 	workers := fs.Int("workers", 0, "worker goroutines (default: one per CPU); never affects the output")
+	configFile := fs.String("config", "", "calibration file (mapgen-terrain-config-v1) naming only the values it changes; see --print-config")
+	printConfig := fs.Bool("print-config", false, "print the default calibration as a configuration file and exit")
 	version := fs.Bool("version", false, "print version and exit")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -54,6 +58,26 @@ func run(ctx context.Context, args []string) error {
 	if *version {
 		fmt.Println(mapgen.Version().String())
 		return nil
+	}
+	if *printConfig {
+		b, err := json.Marshal(terrain.DefaultConfig(), json.Deterministic(true), jsontext.WithIndent("  "))
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(b))
+		return nil
+	}
+	var cfg *terrain.Config
+	if *configFile != "" {
+		data, err := os.ReadFile(*configFile)
+		if err != nil {
+			return err
+		}
+		c, err := terrain.ParseConfig(data)
+		if err != nil {
+			return err
+		}
+		cfg = &c
 	}
 	if *workers < 0 {
 		return fmt.Errorf("workers must not be negative")
@@ -69,7 +93,7 @@ func run(ctx context.Context, args []string) error {
 		}
 		seed = &v
 	}
-	r, err := terrain.Generate(ctx, terrain.Options{In: *in, Seed: seed, Workers: *workers, NoResidual: !*residual, Recenter: *recenterFlag, Version: mapgen.Version().String()})
+	r, err := terrain.Generate(ctx, terrain.Options{In: *in, Seed: seed, Workers: *workers, NoResidual: !*residual, Recenter: *recenterFlag, Config: cfg, Version: mapgen.Version().String()})
 	if err != nil {
 		return err
 	}

@@ -53,6 +53,8 @@ const (
 	// PreviewStructureFile is the surface without shading, with feature
 	// envelopes, backbones, and trench backbones drawn over it.
 	PreviewStructureFile = "preview-structure.png"
+	PreviewReliefFile    = "preview-relief.png"
+	PreviewChangeFile    = "preview-change.png"
 
 	FieldElevation = "elevation"
 	FieldHigh      = "high"
@@ -213,7 +215,9 @@ type Options struct {
 	// landmass terrain implies at the provisional fraction.
 	Recenter bool
 	Seed     *uint64 // terrain seed; nil uses the trench seed
-	Version  string  // generator version
+	// Config is the calibration; nil uses DefaultConfig. It must be valid.
+	Config  *Config
+	Version string // generator version
 }
 
 func checksum(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
@@ -242,7 +246,14 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 		seed, source = *o.Seed, SeedExplicit
 	}
 	g := sm.Grid
-	p, rp, bp, sp, rsp := DefaultFoundationParams(), DefaultRegionalParams(), DefaultBeltParams(), DefaultSubcellParams(), DefaultResidualParams()
+	cfg := DefaultConfig()
+	if o.Config != nil {
+		if err := o.Config.Validate(); err != nil {
+			return nil, fmt.Errorf("config: %w", err)
+		}
+		cfg = *o.Config
+	}
+	p, rp, bp, sp, rsp := cfg.Foundation, cfg.Regional, cfg.Belts, cfg.Subcell, cfg.Residual
 	var residual *ResidualParams
 	if !o.NoResidual {
 		residual = &rsp
@@ -405,20 +416,10 @@ func Write(ctx context.Context, dir string, r *Result, previewScale int) error {
 	}
 	if m.RecenteredRecords != nil {
 		// Moved records are written afresh and described anew.
-		rm, err := structure.WriteRecords(tmp, r.Structure)
+		tm, err := WriteMovedRecords(tmp, r.Structure, r.Trenches, *m.RecenteredRecords)
 		if err != nil {
 			return err
 		}
-		tdata, err := r.Trenches.Marshal()
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(filepath.Join(tmp, trench.TrenchesFile), tdata, 0o644); err != nil {
-			return err
-		}
-		tm := *m.RecenteredRecords
-		tm.RecenteredRecords, tm.Retained = &rm, rm.Records()
-		tm.Trenches.SHA256 = checksum(tdata)
 		m.RecenteredRecords, m.Retained = &tm, tm.Records()
 	} else {
 		for _, f := range m.Retained {
@@ -461,6 +462,12 @@ func Write(ctx context.Context, dir string, r *Result, previewScale int) error {
 			return err
 		}
 		if err := writeStructurePreview(ctx, filepath.Join(tmp, PreviewStructureFile), r, previewScale); err != nil {
+			return err
+		}
+		if err := writeReliefPreview(ctx, filepath.Join(tmp, PreviewReliefFile), r, previewScale); err != nil {
+			return err
+		}
+		if err := writeChangePreview(ctx, filepath.Join(tmp, PreviewChangeFile), r, previewScale); err != nil {
 			return err
 		}
 	}

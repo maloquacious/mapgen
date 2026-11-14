@@ -41,6 +41,7 @@ Contracts and invariants (wrapping, determinism, land fraction, artifact formats
    Writes `manifest.json`, raw float32 rasters (`affinity`, `continental`, `coast`), and `preview.png`.
 2. `cmd/landmask`: freezes the coastline.
    From a `terrain` artifact (the default pipeline, run after terrain) it selects sea level as the elevation quantile, makes the ocean one connected body, requires a repair fraction of at most 0.01, clamps ocean to −1 m and other cells to +1 m (no cell moving more than 500 m), and writes the frozen ocean mask with the clamped fields and the retained records.
+   `--recenter` translates the result, records included.
    From a `continents` artifact it selects exactly `round(fraction * cells)` land cells by affinity, for inspection.
    See [cmd/landmask/README.md](cmd/landmask/README.md).
 
@@ -62,6 +63,8 @@ Contracts and invariants (wrapping, determinism, land fraction, artifact formats
    Cells that features reach are sampled at 4 x 4 points for mean elevation, high, and relief, in parallel tiles whose result does not depend on the worker count.
    Residual noise (no wavelength under four cells, at most 10 percent of relief, grain along belts) is added unless `--residual=false`.
    `--recenter` translates the complete result, structure and trench records included, to center the land terrain implies.
+   `--config` overrides calibration values from a `mapgen-terrain-config-v1` file (`--print-config` prints the defaults).
+   Previews show the tinted surface, the structure over it, relief bands, and where terrain moved the provisional coast.
    A rift's axis stops 300 m below the lower of the foundation and the datum.
    Elevations are relative to the provisional coast at 0 m; `landmask` then chooses sea level and freezes the coast.
    See [cmd/terrain/README.md](cmd/terrain/README.md).

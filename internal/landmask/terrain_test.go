@@ -5,6 +5,7 @@ package landmask_test
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -20,13 +21,17 @@ import (
 
 // terrainDir builds a small terrain artifact through every stage before
 // landmask, with the structure fixture's features.
-func terrainDir(t *testing.T) string {
+func terrainDir(t *testing.T) string { return terrainDirOpts(t, true, false) }
+
+// terrainDirOpts is terrainDir with the continents centered or not, and
+// terrain recentering or not.
+func terrainDirOpts(t *testing.T, centered, recenter bool) string {
 	t.Helper()
 	p, err := fracture.DefaultParams(42, 96, 48, 6)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.Recenter = true
+	p.Recenter = centered
 	cr, err := fracture.Generate(t.Context(), p)
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +60,7 @@ func terrainDir(t *testing.T) string {
 	if err := trench.Write(t.Context(), tdir, tr, 0); err != nil {
 		t.Fatal(err)
 	}
-	r, err := terrain.Generate(t.Context(), terrain.Options{In: tdir, Version: "test"})
+	r, err := terrain.Generate(t.Context(), terrain.Options{In: tdir, Recenter: recenter, Version: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +80,7 @@ func TestTerrainInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := landmask.GenerateFromTerrain(t.Context(), in, nil, "test")
+	r, err := landmask.GenerateFromTerrain(t.Context(), in, nil, false, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +124,7 @@ func TestTerrainInput(t *testing.T) {
 	if err := landmask.WriteTerrain(t.Context(), again, got, 1); err != nil {
 		t.Fatal(err)
 	}
-	r2, err := landmask.GenerateFromTerrain(t.Context(), in, nil, "test")
+	r2, err := landmask.GenerateFromTerrain(t.Context(), in, nil, false, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +146,7 @@ func TestTerrainInput(t *testing.T) {
 	}
 	// An explicit fraction is honored.
 	fr := 0.3
-	r3, err := landmask.GenerateFromTerrain(t.Context(), in, &fr, "test")
+	r3, err := landmask.GenerateFromTerrain(t.Context(), in, &fr, false, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,4 +175,91 @@ func TestTerrainInput(t *testing.T) {
 	if _, err := landmask.LoadTerrain(t.Context(), in); err == nil {
 		t.Fatal("loaded a terrain artifact as a landmask")
 	}
+}
+
+// Recentering moves the selected result by whole cells, records included,
+// and the artifact loads and writes the same bytes again.
+func TestTerrainRecenter(t *testing.T) {
+	in := terrainDirOpts(t, false, false)
+	plain, err := landmask.GenerateFromTerrain(t.Context(), in, nil, false, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := landmask.GenerateFromTerrain(t.Context(), in, nil, true, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := r.Manifest.Recentering
+	if !c.Applied || c.ShiftX == 0 && c.ShiftY == 0 || r.Manifest.RecenteredRecords == nil || plain.Manifest.Recentering.Applied {
+		t.Fatalf("recentering %+v", c)
+	}
+	g := r.Manifest.Grid
+	moved := func(i int) int {
+		x, y := i%g.Columns, i/g.Columns
+		return ((y+c.ShiftY)%g.Rows)*g.Columns + (x+c.ShiftX)%g.Columns
+	}
+	for i := range plain.Land {
+		j := moved(i)
+		if r.Land[j] != plain.Land[i] || r.Elevation[j] != plain.Elevation[i] || r.High[j] != plain.High[i] ||
+			r.Relief[j] != plain.Relief[i] || r.Structure.Land[j] != plain.Structure.Land[i] {
+			t.Fatalf("cell %d did not move to %d", i, j)
+		}
+	}
+	if r.Diagnostics != plain.Diagnostics || r.Manifest.SeaLevelM != plain.Manifest.SeaLevelM {
+		t.Fatal("recentering changed the selection")
+	}
+	t.Logf("shift (%d, %d)", c.ShiftX, c.ShiftY)
+	out := filepath.Join(t.TempDir(), "moved")
+	if err := landmask.WriteTerrain(t.Context(), out, r, 0); err != nil {
+		t.Fatal(err)
+	}
+	got, err := landmask.LoadTerrain(t.Context(), out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again := filepath.Join(t.TempDir(), "again")
+	if err := landmask.WriteTerrain(t.Context(), again, got, 0); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		a, _ := os.ReadFile(filepath.Join(out, e.Name()))
+		if b, err := os.ReadFile(filepath.Join(again, e.Name())); err != nil || !bytes.Equal(a, b) {
+			t.Fatalf("%s differs after load and write", e.Name())
+		}
+	}
+	// A tampered shift is rejected.
+	path := filepath.Join(out, landmask.ManifestFile)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tampered := bytes.Replace(b, []byte(fmt.Sprintf(`"shift_x": %d`, c.ShiftX)), []byte(fmt.Sprintf(`"shift_x": %d`, (c.ShiftX+1)%g.Columns)), 1)
+	if bytes.Equal(tampered, b) {
+		t.Fatal("could not tamper with the shift")
+	}
+	if err := os.WriteFile(path, tampered, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := landmask.LoadTerrain(t.Context(), out); err == nil {
+		t.Fatal("accepted a tampered shift")
+	}
+
+	// After terrain's own recentering the shifts accumulate and still load.
+	chained := terrainDirOpts(t, false, true)
+	rc, err := landmask.GenerateFromTerrain(t.Context(), chained, nil, true, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out = filepath.Join(t.TempDir(), "chained")
+	if err := landmask.WriteTerrain(t.Context(), out, rc, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := landmask.LoadTerrain(t.Context(), out); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("chained shift (%d, %d)", rc.Manifest.Recentering.ShiftX, rc.Manifest.Recentering.ShiftY)
 }

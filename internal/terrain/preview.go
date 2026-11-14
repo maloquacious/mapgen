@@ -134,6 +134,80 @@ func Hypsometric(ctx context.Context, g continent.Grid, elev []float32, level fl
 	return img, nil
 }
 
+// reliefBands are the upper bounds, in m, of the relief preview's bands,
+// and reliefColors their colors, one more than the bounds: light for
+// quiet ground, dark for rugged.
+var (
+	reliefBands  = []float32{50, 150, 300, 600, 1000, 2000, 3500}
+	reliefColors = []color.RGBA{
+		{247, 244, 233, 255}, {240, 226, 190, 255}, {229, 196, 140, 255}, {214, 155, 96, 255},
+		{191, 109, 64, 255}, {156, 66, 46, 255}, {112, 33, 37, 255}, {60, 16, 30, 255},
+	}
+	// Change preview: unchanged land and water, water terrain raised to
+	// land, and land terrain lowered to water.
+	changeLand        = color.RGBA{176, 204, 160, 255}
+	changeWater       = color.RGBA{172, 204, 230, 255}
+	changeWaterToLand = color.RGBA{230, 110, 10, 255}
+	changeLandToWater = color.RGBA{130, 20, 170, 255}
+)
+
+// writeReliefPreview draws ReliefM in bands, with the coast at the
+// provisional-fraction quantile as a line, sampling every scale-th cell.
+func writeReliefPreview(ctx context.Context, path string, r *Result, scale int) error {
+	g := r.Manifest.Grid
+	w, h := (g.Columns-1)/scale+1, (g.Rows-1)/scale+1
+	at := func(x, y int) int { return ((y%h+h)%h)*scale*g.Columns + ((x%w+w)%w)*scale }
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := range h {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		for x := range w {
+			i := at(x, y)
+			b := 0
+			for b < len(reliefBands) && r.Relief[i] >= reliefBands[b] {
+				b++
+			}
+			px := reliefColors[b]
+			if r.Above[i] != r.Above[at(x+1, y)] || r.Above[i] != r.Above[at(x, y+1)] {
+				px = previewCoastLine
+			}
+			img.SetRGBA(x, y, px)
+		}
+	}
+	return encode(path, img)
+}
+
+// writeChangePreview draws the provisional mask against the land at the
+// provisional-fraction quantile, marking the cells terrain moved from water
+// to land and from land to water, sampling every scale-th cell.
+func writeChangePreview(ctx context.Context, path string, r *Result, scale int) error {
+	g := r.Manifest.Grid
+	w, h := (g.Columns-1)/scale+1, (g.Rows-1)/scale+1
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := range h {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		for x := range w {
+			i := y*scale*g.Columns + x*scale
+			var px color.RGBA
+			switch prov, now := r.Structure.Land[i] == 1, r.Above[i]; {
+			case prov && now:
+				px = changeLand
+			case !prov && !now:
+				px = changeWater
+			case now:
+				px = changeWaterToLand
+			default:
+				px = changeLandToWater
+			}
+			img.SetRGBA(x, y, px)
+		}
+	}
+	return encode(path, img)
+}
+
 // writeStructurePreview draws the surface in the same tint without shading,
 // each feature's envelope outline, every backbone, and every trench backbone,
 // ridge chains, branches, troughs, corridors, and volcanic peaks, sampling

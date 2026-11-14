@@ -128,7 +128,11 @@ func TestTerrainInput(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(out, landmask.PreviewFile)); err != nil {
 		t.Fatal(err)
 	}
-	if err := run(t.Context(), []string{"--in", in, "--out", filepath.Join(t.TempDir(), "x"), "--recenter"}); err == nil {
-		t.Fatal("accepted --recenter with terrain input")
+	moved := filepath.Join(t.TempDir(), "moved")
+	if err := run(t.Context(), []string{"--in", in, "--out", moved, "--recenter"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := landmask.LoadTerrain(t.Context(), moved); err != nil || !got.Manifest.Recentering.Applied {
+		t.Fatalf("recentered run: %v", err)
 	}
 }

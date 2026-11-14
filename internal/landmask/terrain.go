@@ -29,7 +29,7 @@ import (
 // "Landmask integration" in the terrain design and section 7 of the
 // cylindrical specification.
 const (
-	TerrainFormat    = "mapgen-landmask-terrain-v1"
+	TerrainFormat    = "mapgen-landmask-terrain-v2"
 	InputContinents  = "continents"
 	InputTerrain     = "terrain"
 	TerrainSelection = "lowest cells-k by elevation, ties by index, the level shifted to 0 m; the largest eight-connected torus component grown to cells-k by elevation then index"
@@ -83,9 +83,17 @@ type TerrainManifest struct {
 	// SeaLevelM is the elevation, relative to terrain's provisional datum,
 	// moved to 0 m. Elevations in ridges.json remain relative to the
 	// provisional datum.
-	SeaLevelM      float64   `json:"sea_level_m"`
-	RepairFraction float64   `json:"repair_fraction"`
-	Mask           MaskField `json:"mask"`
+	SeaLevelM      float64 `json:"sea_level_m"`
+	RepairFraction float64 `json:"repair_fraction"`
+	// Recentering records this stage's translation, relative to the
+	// terrain input; it is always present.
+	Recentering structure.Recentering `json:"recentering"`
+	// RecenteredRecords describes the retained structure and trench records
+	// when this stage moved them: the trench manifest the terrain input's
+	// records had, as if the trench stage had recentered by the combined
+	// shift. It is absent when the records are the input's bytes.
+	RecenteredRecords *trench.Manifest `json:"recentered_records,omitzero"`
+	Mask              MaskField        `json:"mask"`
 	// Retained lists the structure and trench records and ridges.json,
 	// copied unchanged from the terrain input.
 	Retained    []structure.File  `json:"retained"`
@@ -144,7 +152,11 @@ var terrainFieldDescriptions = map[string]string{
 // GenerateFromTerrain reads and verifies a terrain artifact and freezes the
 // ocean leaving round(fraction*cells) non-ocean cells. A nil fraction uses
 // the terrain's provisional land fraction. Input files are never changed.
-func GenerateFromTerrain(ctx context.Context, dir string, fraction *float64, version string) (*TerrainResult, error) {
+//
+// With recenter, the result is then translated by whole cells to center
+// the largest eight-connected landmass of the frozen mask, records
+// included, as terrain's --recenter moves its own; nothing is reselected.
+func GenerateFromTerrain(ctx context.Context, dir string, fraction *float64, recenter bool, version string) (*TerrainResult, error) {
 	data, err := os.ReadFile(filepath.Join(dir, ManifestFile))
 	if err != nil {
 		return nil, err
@@ -209,7 +221,46 @@ func GenerateFromTerrain(ctx context.Context, dir string, fraction *float64, ver
 			d.LandToWater++
 		}
 	}
+	if recenter {
+		if err := r.recenter(ctx); err != nil {
+			return nil, err
+		}
+	}
 	return r, ctx.Err()
+}
+
+// recenter translates r to center the largest landmass of the frozen mask.
+func (r *TerrainResult) recenter(ctx context.Context) error {
+	g := r.Manifest.Grid
+	v := make([]float32, len(r.Land))
+	for i, l := range r.Land {
+		v[i] = float32(l)
+	}
+	f := &fracture.FractureField{Columns: g.Columns, Rows: g.Rows, WidthKM: g.WidthKM, HeightKM: g.HeightKM, Values: v}
+	c, err := fracture.FindCentering(ctx, f, r.Manifest.ActualLandFraction)
+	if err != nil {
+		return fmt.Errorf("recenter: %w", err)
+	}
+	step := structure.Recentering{
+		Applied: true, ShiftX: c.X, ShiftY: c.Y, ShiftXKM: float64(c.X) * g.CellWidthKM, ShiftYKM: float64(c.Y) * g.CellHeightKM,
+		XAmbiguous: c.XAmbiguous, YAmbiguous: c.YAmbiguous, ComponentCells: c.ComponentCells, Components: c.Components,
+		Transform: structure.RecenterTransform,
+	}
+	r.Manifest.Recentering = step
+	if c.X == 0 && c.Y == 0 {
+		return nil
+	}
+	tm, err := terrain.MoveRecords(ctx, r.Structure, r.Trenches, r.Ridges, r.Manifest.Input.Manifest.RecordsManifest(), step)
+	if err != nil {
+		return err
+	}
+	structure.Rotate(r.Land, g.Columns, g.Rows, c.X, c.Y)
+	for _, v := range [][]float32{r.Elevation, r.High, r.Relief} {
+		structure.Rotate(v, g.Columns, g.Rows, c.X, c.Y)
+	}
+	// WriteTerrain saves the moved records and fills in their checksums.
+	r.Manifest.RecenteredRecords, r.source = &tm, ""
+	return ctx.Err()
 }
 
 // marshal returns the canonical bytes of v, or nil if it cannot.
@@ -277,13 +328,31 @@ func WriteTerrain(ctx context.Context, dir string, r *TerrainResult, previewScal
 	if err := os.WriteFile(filepath.Join(tmp, MaskFile), r.Land, 0o644); err != nil {
 		return err
 	}
-	for _, f := range m.Retained {
-		b, err := trench.ReadRecords(r.source, []structure.File{f})
+	if m.RecenteredRecords != nil {
+		// Moved records are written afresh and described anew.
+		tm, err := terrain.WriteMovedRecords(tmp, r.Structure, r.Trenches, *m.RecenteredRecords)
 		if err != nil {
-			return fmt.Errorf("retained record: %w", err)
-		}
-		if err := os.WriteFile(filepath.Join(tmp, f.File), b[f.File], 0o644); err != nil {
 			return err
+		}
+		rdata, err := r.Ridges.Marshal()
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(tmp, terrain.RidgesFile), rdata, 0o644); err != nil {
+			return err
+		}
+		ridges := m.Input.Manifest.Ridges
+		ridges.SHA256 = checksum(rdata)
+		m.RecenteredRecords, m.Retained = &tm, append(tm.Records(), ridges)
+	} else {
+		for _, f := range m.Retained {
+			b, err := trench.ReadRecords(r.source, []structure.File{f})
+			if err != nil {
+				return fmt.Errorf("retained record: %w", err)
+			}
+			if err := os.WriteFile(filepath.Join(tmp, f.File), b[f.File], 0o644); err != nil {
+				return err
+			}
 		}
 	}
 	diagnostics, err := json.Marshal(r.Diagnostics, json.Deterministic(true), jsontext.WithIndent("  "))
@@ -371,17 +440,36 @@ func LoadTerrain(ctx context.Context, dir string) (*TerrainResult, error) {
 	if g != in.Grid {
 		return nil, fmt.Errorf("grid does not match the input manifest")
 	}
-	tm := in.RecordsManifest()
-	if !slices.Equal(m.Retained, append(slices.Clone(in.Retained), in.Ridges)) {
+	// The records are the input's, or the input's moved by this stage's
+	// recentering; ridges.json is the last retained file either way.
+	c := m.Recentering
+	moved := c.Applied && (c.ShiftX != 0 || c.ShiftY != 0)
+	if !c.Applied && c != (structure.Recentering{}) {
+		return nil, fmt.Errorf("recentering is not applied but records a translation")
+	}
+	if moved != (m.RecenteredRecords != nil) {
+		return nil, fmt.Errorf("recentered records do not match the recentering record")
+	}
+	tm, ridgesFile := in.RecordsManifest(), in.Ridges
+	if moved {
+		if err := terrain.CheckMovedRecords(g, tm, *m.RecenteredRecords, c); err != nil {
+			return nil, err
+		}
+		tm = *m.RecenteredRecords
+		if len(m.Retained) > 0 {
+			if last := m.Retained[len(m.Retained)-1]; last.File == ridgesFile.File {
+				ridgesFile.SHA256 = last.SHA256
+			}
+		}
+	}
+	if !slices.Equal(m.Retained, append(tm.Records(), ridgesFile)) {
 		return nil, fmt.Errorf("retained records do not match the input manifest")
 	}
 	tr, err := trench.LoadRecords(ctx, dir, tm)
 	if err != nil {
 		return nil, err
 	}
-	// LoadRecords verified the structure and trench records; ridges.json
-	// is the last retained file.
-	records, err := trench.ReadRecords(dir, []structure.File{in.Ridges})
+	records, err := trench.ReadRecords(dir, []structure.File{ridgesFile})
 	if err != nil {
 		return nil, err
 	}
