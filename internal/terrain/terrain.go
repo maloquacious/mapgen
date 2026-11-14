@@ -11,10 +11,11 @@
 // sea level; landmask chooses sea level later.
 //
 // So far it builds the continental foundation, the surface with no
-// features, and publishes it with the structure and trench records it
+// features, and the regional surface each feature pulls it toward, at cell
+// centers, and publishes it with the structure and trench records it
 // retains.
-// Feature synthesis, ridges, subcell rasterization, residual detail, and
-// recentering are later steps of the design.
+// Ridges, volcanic peaks, trench depressions, subcell rasterization,
+// residual detail, and recentering are later steps of the design.
 package terrain
 
 import (
@@ -40,15 +41,17 @@ import (
 )
 
 const (
-	Format          = "mapgen-terrain-v2"
+	Format          = "mapgen-terrain-v3"
 	Topology        = "torus: x and y wrap; the map may be recentered until climate"
 	Datum           = "provisional: 0 m is the provisional coast of the structure records, not sea level"
-	Absent          = "absent"
 	SeedExplicit    = "explicit"
 	SeedFromInput   = "trench input"
 	ManifestFile    = "manifest.json"
 	DiagnosticsFile = "diagnostics.json"
 	PreviewFile     = "preview.png"
+	// PreviewStructureFile is the surface without shading, with feature
+	// envelopes, backbones, and trench backbones drawn over it.
+	PreviewStructureFile = "preview-structure.png"
 
 	FieldElevation = "elevation"
 	FieldHigh      = "high"
@@ -90,9 +93,11 @@ type Manifest struct {
 	ProvisionalLandFraction float64          `json:"provisional_land_fraction"`
 	ProvisionalLandCells    int              `json:"provisional_land_cells"`
 	FoundationParameters    FoundationParams `json:"foundation_parameters"`
-	// FeatureSynthesis is Absent until features are rasterized: the
-	// surface is the foundation alone, so HighM equals ElevationM and
-	// ReliefM is 0.
+	RegionalParameters      RegionalParams   `json:"regional_parameters"`
+	// FeatureSynthesis names how far features are synthesized. With
+	// RegionalAlgorithm the surface is the regional surface evaluated at
+	// cell centers, with no ridges or subcell sampling, so HighM equals
+	// ElevationM and ReliefM is 0.
 	FeatureSynthesis string `json:"feature_synthesis"`
 	// Retained lists the structure and trench records copied unchanged, as
 	// the input manifest describes them.
@@ -126,6 +131,9 @@ type Diagnostics struct {
 	ReliefLand     Stats `json:"relief_land"`
 	ReliefWater    Stats `json:"relief_water"`
 	Shift          Shift `json:"shift"`
+	// Features reports each feature's drawn targets and core elevation, in
+	// feature order.
+	Features []FeatureDiagnostics `json:"features"`
 }
 
 // Result keeps everything in the input's coordinates.
@@ -136,6 +144,8 @@ type Result struct {
 	Elevation []float32
 	High      []float32
 	Relief    []float32
+	// foundation is the surface with no features. It is derived, not saved.
+	foundation []float32
 	// Above marks the cells landmask's quantile selection would make land
 	// at the provisional fraction. It is derived, not saved.
 	Above       []bool
@@ -180,7 +190,7 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 		seed, source = *o.Seed, SeedExplicit
 	}
 	g := sm.Grid
-	p := DefaultFoundationParams()
+	p, rp := DefaultFoundationParams(), DefaultRegionalParams()
 	r := &Result{
 		Manifest: Manifest{
 			Format: Format, GeneratorVersion: o.Version,
@@ -188,7 +198,7 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 			Seed:  seed, SeedSource: source, SeedDerivation: prng.DerivationVersion, PRNG: prng.Algorithm,
 			Grid: g, Topology: Topology, Datum: Datum,
 			ProvisionalLandFraction: sm.ProvisionalLandFraction, ProvisionalLandCells: sm.ProvisionalLandCells,
-			FoundationParameters: p, FeatureSynthesis: Absent, Retained: tm.Records(),
+			FoundationParameters: p, RegionalParameters: rp, FeatureSynthesis: RegionalAlgorithm, Retained: tm.Records(),
 		},
 		Structure: s, Trenches: tr.Trenches, records: records,
 	}
@@ -200,7 +210,14 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	if r.Elevation, err = fd.elevation(ctx, p, g, dist); err != nil {
+	narrow, err := shelfNarrowing(ctx, p, g, s.Features)
+	if err != nil {
+		return nil, err
+	}
+	if r.foundation, err = fd.elevation(ctx, p, g, dist, narrow); err != nil {
+		return nil, err
+	}
+	if r.Elevation, r.Diagnostics.Features, err = regional(ctx, seed, rp, g, s.Features, r.foundation); err != nil {
 		return nil, err
 	}
 	r.High = slices.Clone(r.Elevation)
@@ -315,7 +332,7 @@ func Write(ctx context.Context, dir string, r *Result, previewScale int) error {
 	}
 	diagnostics = append(diagnostics, '\n')
 	m.Diagnostics = File{File: DiagnosticsFile, Format: "json", SHA256: checksum(diagnostics),
-		Description: "elevation and relief statistics on provisional land and water, and the datum shift at the provisional fraction"}
+		Description: "elevation and relief statistics on provisional land and water, the datum shift at the provisional fraction, and each feature's drawn targets and core elevation"}
 	manifest, err := json.Marshal(m, json.Deterministic(true), jsontext.WithIndent("  "))
 	if err != nil {
 		return err
@@ -330,6 +347,9 @@ func Write(ctx context.Context, dir string, r *Result, previewScale int) error {
 	}
 	if previewScale > 0 {
 		if err := writePreview(ctx, filepath.Join(tmp, PreviewFile), r, previewScale); err != nil {
+			return err
+		}
+		if err := writeStructurePreview(ctx, filepath.Join(tmp, PreviewStructureFile), r, previewScale); err != nil {
 			return err
 		}
 	}
@@ -376,7 +396,7 @@ func Load(ctx context.Context, dir string) (*Result, error) {
 	if m.Format != Format {
 		return nil, fmt.Errorf("unsupported terrain format %q", m.Format)
 	}
-	if m.FeatureSynthesis != Absent {
+	if m.FeatureSynthesis != RegionalAlgorithm {
 		return nil, fmt.Errorf("unsupported feature synthesis %q", m.FeatureSynthesis)
 	}
 	tm := m.Input.Manifest

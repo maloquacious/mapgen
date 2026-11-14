@@ -191,7 +191,7 @@ func TestFoundationStraightCoast(t *testing.T) {
 	fd.fields[fieldShelfDepth] = constant(g, 0.5) // 125 m
 	fd.fields[fieldShelfWidth] = constant(g, 0)   // 50 km
 	fd.fields[fieldAbyssalDepth] = constant(g, 1) // 5500 m
-	elev, err := fd.elevation(t.Context(), p, g, dist)
+	elev, err := fd.elevation(t.Context(), p, g, dist, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

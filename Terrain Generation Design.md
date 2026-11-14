@@ -123,8 +123,9 @@ plain:  −A                beyond
 `S` is the shelf-break depth, 50–200 m; `W` the shelf width, 50–200 km; `Rs` the slope width, default 150 km; and `A` the abyssal depth, 3,500–5,500 m.
 Each comes from its own smooth field: a fracture field on a grid of half the minimum wavelength (200 km), with disc radii from 200 to 400 km, normalized to [0,1] by its extremes and sampled bilinearly on the torus, like the interior variation field.
 Each segment joins the next with a smoothstep, so the profile has no kinks.
-Within the stress reach of an active margin or island arc, the shelf width is reduced toward 50 km: margins facing a trench have narrow shelves.
-This depends on features, so it lands with step 2 rather than step 1.
+Near an active margin or island arc, the shelf width is reduced toward 50 km: margins facing a trench have narrow shelves.
+Within 1.5 half widths of the backbone the shelf is 50 km wide, or its own width if narrower, easing back to its own width at 3 half widths.
+This depends on features, so it landed with step 2, as `foundation-v2`.
 Water enclosed by land gets the same profile; a small enclosed water is a shallow depression, which `landmask` will not join to the ocean, and which drainage may keep as a lake.
 
 **No coast.**
@@ -145,6 +146,8 @@ An area feature draws one value per target.
   It is absolute, not added to the foundation: a plateau target of 3,000 m means a plateau at 3,000 m, and an island arc target of −500 m means a ridge whose crest lies 500 m under the datum, whatever the seabed beneath.
 - `relief_m` is the high-minus-valley amplitude terrain builds on top of that level: ridge heights above the regional surface for belts, the depth of a rift axis below its shoulders, rim roughness for a plateau.
 
+A record may omit `targets`, or one of them; fixtures often do.
+Terrain then uses the range structure's automatic placement assigns to that type and kind, recorded as `regional_parameters.default_targets`.
 Faults have no targets and get terrain's own small values, below.
 
 ### Regional surface
@@ -207,14 +210,15 @@ As maturity rises, chain amplitude falls toward the bottom of the relief range, 
   It blends with its parent belt's flank through the uplift rule.
 - **Basin:** a depression to its regional target, which is low (0–400 m on land), with a smooth floor.
   A basin under the datum floods at `landmask` only if it connects to the ocean; otherwise it is a closed depression for drainage to resolve.
-- **Rift:** the shoulders, outside `axis_fraction` of the width, are uplift to the regional target; the axis is a depression to the shoulder level minus the relief draw.
-  The axis floor may fall under the datum, so a rift can become an inlet, a lake, or an arm of the sea.
+- **Rift:** the shoulders are uplift to the regional target, at full weight within `axis_fraction` `a` of the half width and weighing `K((t − a) / (1 − a))` beyond it; the axis is a depression weighing `K(t / a)` to the shoulder level, the larger of the target and the foundation, minus the relief draw.
+  So the shoulders crest at the axis edge, and the axis floor may fall under the datum: a rift can become an inlet, a lake, or an arm of the sea.
 - **Island arc:** a submarine ridge to its regional target, plus separate volcanic peaks along the backbone, each a compact cone 10–40 km across, 50–150 km apart, with heights from the relief draw.
   Peaks that rise above sea level after `landmask` become the arc's islands.
 - **Trench:** each trench record is a narrow depression along its backbone, to its floor target below the datum, deepest on the axis and easing to the surrounding seabed at the edge of its width.
   The `trench` stage decides where trenches lie and on which side of their parents; terrain only gives them depth.
   A trench never lowers provisional land: trench placement looks past islands smaller than structure's province minimum, and those islands stay.
-- **Fault:** a narrow linear form within its width: a trough up to 200 m deep for `strike_slip`, a step of up to 300 m across the line for `normal`, and a low ridge up to 300 m high for `thrust`.
+- **Fault:** a narrow linear form within its width, weighted by `K(t)`: a trough 50–200 m deep for `strike_slip`, a step of 100–300 m across the line for `normal`, and a low ridge 100–300 m high for `thrust`.
+  A normal fault raises one side by half its offset and lowers the other by half, the downthrown side drawn from its stream; the trough is a depression and the ridge an uplift in the combination rule.
   A fault never makes a mountain range by itself.
 
 ## Rasterization
@@ -258,7 +262,7 @@ All streams use `prng.New(seed, domain, sequence)` with the terrain seed:
 | --- | --- | --- |
 | `terrain-v1/foundation/provinces` | Province ID | Interior base level of one province |
 | `terrain-v1/foundation/fields` | Field number | Smooth fields: interior variation (0), shelf depth (1), shelf width (2), abyssal depth (3) |
-| `terrain-v1/feature` | Feature `key` | Target control samples, chains, branches, gaps, corridors, and peaks for one feature |
+| `terrain-v1/feature` | Feature `key` | Target control samples, chains, branches, gaps, corridors, and peaks for one feature. A fault draws its offset, then its downthrown side; a linear feature its control spacing, then a regional and a relief value at each control sample; an area feature its regional and relief values. Later steps draw after these |
 | `terrain-v1/trench` | Trench `key` | The floor depth and along-axis variation of one trench |
 | `terrain-v1/residual` | Octave number | One octave of residual noise |
 
@@ -268,17 +272,17 @@ The order of draws within each stream is part of `terrain-v1`; changing it chang
 
 ## Saved artifact
 
-The format is `mapgen-terrain-v2`; v2 reads a trench checkpoint instead of a structure checkpoint.
+The format is `mapgen-terrain-v3`; v2 read a trench checkpoint instead of a structure checkpoint, and v3 adds the regional surface.
 
 | Content | Purpose |
 | --- | --- |
-| `manifest.json` | Format and generator versions, input trench manifest (which records the structure manifest) and its checksum, seed, grid, resolved parameters (`foundation-v1`, `belts-v1`, `subcell-v1`, `residual-v1`), residual on or off, recentering, and checksums for every saved file |
+| `manifest.json` | Format and generator versions, input trench manifest (which records the structure manifest) and its checksum, seed, grid, resolved parameters (`foundation-v2`, `regional-v1`, and later `belts-v1`, `subcell-v1`, `residual-v1`), how far feature synthesis goes (`feature_synthesis`), residual on or off, recentering, and checksums for every saved file |
 | `elevation.f32` | `ElevationM`: mean solid surface elevation, m, relative to the provisional datum |
 | `high.f32` | `HighM`: representative high, m, at least `ElevationM` |
 | `relief.f32` | `ReliefM`: representative high minus valley, m, at least 0 |
 | `ridges.json` | Ridge chains, branches, corridors, and saddles in the structure coordinate convention, keyed by parent feature |
 | Retained records | The structure records `features.json`, `provinces.json`, `provinces.u32`, `provisional-land.u8`, `rock.u8`, `pressure.f32`, `shear.f32`, `igneous.f32`, `rock-noise.f32`, and the trench records `trenches.json`, unchanged |
-| `diagnostics.json` | Elevation and relief statistics on provisional land and water, the datum shift and changed cells at the provisional fraction, target conformance per feature, and noise bounds measured |
+| `diagnostics.json` | Elevation and relief statistics on provisional land and water, the datum shift and changed cells at the provisional fraction, target conformance per feature (its drawn targets and the elevation of its core, the cells where its own weight is at least 0.9, a rift's shoulders), and noise bounds measured |
 | Previews | See "Previews and acceptance" |
 
 Rasters are float32 little-endian, full resolution, row-major, row 0 at the north, as everywhere else.
@@ -352,9 +356,10 @@ The terrain-mode artifact carries the clamped elevation, high, and relief fields
 1. **Foundation and artifact.** Done; see `cmd/terrain/README.md`.
    Full-resolution torus distance transform, land and water profiles, province base levels, the artifact with `Load`, `preview.png`, and the foundation tests.
    No features yet: the provisional land is exactly the land above 0 m.
-2. **Regional surface on fixtures.**
-   Envelope weights and target interpretation for every feature type, the combination rule, and `preview-structure.png`, with residual off.
-   This is the handoff the structure design asks to prove on fixed features.
+2. **Regional surface on fixtures.** Done.
+   Envelope weights and target interpretation for every feature type, the combination rule, narrow shelves near margins and arcs, and `preview-structure.png`, with residual off.
+   The surface is evaluated at cell centers; step 4 replaces that with subcell sampling.
+   The structure fixture's handoff test shows every feature in the surface, with each draw in its range.
 3. **Belt components.**
    Ridge chains, branches, longitudinal basins, corridors and saddles, volcanic peaks, the trench depressions from the trench records, and `ridges.json`.
 4. **Subcell rasterization.**

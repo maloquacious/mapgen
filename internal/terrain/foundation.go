@@ -18,7 +18,7 @@ import (
 // an interior base level on land, and a shelf, slope, and abyssal plain on
 // water. See "The continental foundation" in the design.
 const (
-	FoundationAlgorithm = "foundation-v1"
+	FoundationAlgorithm = "foundation-v2"
 	DomainProvinces     = "terrain-v1/foundation/provinces"
 	DomainFields        = "terrain-v1/foundation/fields"
 )
@@ -64,6 +64,12 @@ type FoundationParams struct {
 	ShelfWidthKM  [2]float64 `json:"shelf_width_km"`
 	SlopeKM       float64    `json:"slope_km"`
 	AbyssalDepthM [2]float64 `json:"abyssal_depth_m"`
+	// Margins facing a trench have narrow shelves: within NarrowShelfReach[0]
+	// half widths of an active margin's or island arc's backbone the shelf
+	// width falls to NarrowShelfKM, easing back to its own width at
+	// NarrowShelfReach[1]. A shelf already narrower is kept.
+	NarrowShelfKM    float64    `json:"narrow_shelf_km"`
+	NarrowShelfReach [2]float64 `json:"narrow_shelf_reach"`
 	// Distance names the coast distance the profiles use.
 	Distance string `json:"distance"`
 }
@@ -83,6 +89,7 @@ func DefaultFoundationParams() FoundationParams {
 		VariationShare: 0.15, MinWavelengthKM: 400,
 		ShelfDepthM: [2]float64{50, 200}, ShelfWidthKM: [2]float64{50, 200},
 		SlopeKM: 150, AbyssalDepthM: [2]float64{3500, 5500},
+		NarrowShelfKM: 50, NarrowShelfReach: [2]float64{1.5, 3},
 		Distance: "exact Euclidean distance from each cell center to the nearest cell of the other kind of the provisional mask, on the torus; positive on land",
 	}
 }
@@ -224,8 +231,8 @@ func blur(in []float64, cols, rows int, sx, sy float64) []float64 {
 }
 
 // elevation returns the foundation elevation of every cell from its signed
-// coast distance.
-func (fd *foundation) elevation(ctx context.Context, p FoundationParams, g continent.Grid, dist []float32) ([]float32, error) {
+// coast distance and its shelf narrowing, which is nil for none.
+func (fd *foundation) elevation(ctx context.Context, p FoundationParams, g continent.Grid, dist, narrow []float32) ([]float32, error) {
 	out := make([]float32, len(dist))
 	for i, d := range dist {
 		if i%g.Columns == 0 {
@@ -240,8 +247,11 @@ func (fd *foundation) elevation(ctx context.Context, p FoundationParams, g conti
 			b := fd.base.SampleTorus(x, y) * (1 + p.VariationShare*(2*at(fieldVariation)-1))
 			e = LandProfile(p, b, float64(d))
 		} else {
-			e = WaterProfile(p, lerp(p.ShelfDepthM, at(fieldShelfDepth)), lerp(p.ShelfWidthKM, at(fieldShelfWidth)),
-				lerp(p.AbyssalDepthM, at(fieldAbyssalDepth)), -float64(d))
+			w := lerp(p.ShelfWidthKM, at(fieldShelfWidth))
+			if narrow != nil && w > p.NarrowShelfKM {
+				w -= (w - p.NarrowShelfKM) * float64(narrow[i])
+			}
+			e = WaterProfile(p, lerp(p.ShelfDepthM, at(fieldShelfDepth)), w, lerp(p.AbyssalDepthM, at(fieldAbyssalDepth)), -float64(d))
 		}
 		out[i] = float32(e)
 	}

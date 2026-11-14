@@ -10,6 +10,8 @@ import (
 	"image/png"
 	"math"
 	"os"
+
+	"github.com/maloquacious/mapgen/internal/structure"
 )
 
 // stop is one entry of a hypsometric tint: elevation in m above the shifted
@@ -36,6 +38,18 @@ var (
 		{5000, [3]float64{238, 236, 232}},
 	}
 	previewCoastLine = color.RGBA{24, 24, 24, 255}
+	// Envelope outlines by feature type, backbones, and trench backbones in
+	// the structure preview.
+	previewEnvelope = map[string]color.RGBA{
+		structure.TypeMountainBelt: {120, 40, 20, 255},
+		structure.TypeRift:         {190, 40, 130, 255},
+		structure.TypeIslandArc:    {230, 110, 0, 255},
+		structure.TypeFault:        {90, 90, 90, 255},
+		structure.TypePlateau:      {110, 120, 20, 255},
+		structure.TypeBasin:        {20, 110, 170, 255},
+	}
+	previewBackbone = color.RGBA{30, 20, 20, 255}
+	previewTrench   = color.RGBA{230, 30, 30, 255}
 )
 
 // tint interpolates the stops at m, clamping beyond the ends.
@@ -51,6 +65,12 @@ func tint(stops []stop, m float64) [3]float64 {
 		}
 	}
 	return stops[len(stops)-1].c
+}
+
+// rgba converts a tint to an opaque pixel, scaled by shade.
+func rgba(c [3]float64, shade float64) color.RGBA {
+	b := func(v float64) uint8 { return uint8(min(max(v*shade, 0), 255)) }
+	return color.RGBA{b(c[0]), b(c[1]), b(c[2]), 255}
 }
 
 // shadeExaggeration multiplies slopes for hill shading, so broad foundation
@@ -88,25 +108,84 @@ func writePreview(ctx context.Context, path string, r *Result, scale int) error 
 			gy := shadeExaggeration * float64(r.Elevation[at(x, y+1)]-r.Elevation[at(x, y-1)]) / (2 * dy)
 			// The surface normal is (-gx, -gy, 1), normalized.
 			shade := (-gx*lx - gy*ly + lz) / math.Sqrt(gx*gx+gy*gy+1) / lz
-			shade = min(max(shade, 0.55), 1.35)
-			px := color.RGBA{A: 255}
-			for k, v := range c {
-				b := uint8(min(max(v*shade, 0), 255))
-				switch k {
-				case 0:
-					px.R = b
-				case 1:
-					px.G = b
-				case 2:
-					px.B = b
-				}
-			}
+			px := rgba(c, min(max(shade, 0.55), 1.35))
 			if r.Above[i] != r.Above[at(x+1, y)] || r.Above[i] != r.Above[at(x, y+1)] {
 				px = previewCoastLine
 			}
 			img.SetRGBA(x, y, px)
 		}
 	}
+	return encode(path, img)
+}
+
+// writeStructurePreview draws the surface in the same tint without shading,
+// each feature's envelope outline, every backbone, and every trench backbone,
+// sampling every scale-th cell. Later steps add ridge chains and corridors.
+func writeStructurePreview(ctx context.Context, path string, r *Result, scale int) error {
+	g := r.Manifest.Grid
+	dom := r.Structure.Features.Domain
+	w, h := (g.Columns-1)/scale+1, (g.Rows-1)/scale+1
+	level := r.Diagnostics.Shift.LevelM
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := range h {
+		for x := range w {
+			i := y*scale*g.Columns + x*scale
+			e := float64(r.Elevation[i]) - level
+			c := tint(waterTint, e)
+			if r.Above[i] {
+				c = tint(landTint, e)
+			}
+			img.SetRGBA(x, y, rgba(c, 1))
+		}
+	}
+	// A preview cell is on an outline when it is in the envelope and a
+	// neighbor is not. stamp marks the cells of the feature being drawn with
+	// its position in the list, plus one.
+	ff := r.Structure.Features
+	stamp := make([]int32, w*h)
+	for i := range ff.Features {
+		f := &ff.Features[i]
+		s, id := f.Shape(dom), int32(i+1)
+		structure.Visit(dom, w, h, s.Bounds(), func(x, y int, p structure.Point) {
+			if s.Contains(p) {
+				stamp[y*w+x] = id
+			}
+		})
+		in := func(x, y int) bool { return stamp[(y+h)%h*w+(x+w)%w] == id }
+		structure.Visit(dom, w, h, s.Bounds(), func(x, y int, _ structure.Point) {
+			if in(x, y) && !(in(x+1, y) && in(x-1, y) && in(x, y+1) && in(x, y-1)) {
+				img.SetRGBA(x, y, previewEnvelope[f.Type])
+			}
+		})
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
+	line := func(pts []structure.Sample, c color.RGBA) {
+		// Step along each segment at a quarter of a preview cell.
+		cw, ch := dom.WidthKM/float64(w), dom.HeightKM/float64(h)
+		for k := 0; k+1 < len(pts); k++ {
+			a, b := pts[k], pts[k+1]
+			n := int(math.Ceil(4*max(math.Abs(b.X-a.X)/cw, math.Abs(b.Y-a.Y)/ch))) + 1
+			for j := range n + 1 {
+				t := float64(j) / float64(n)
+				x := int(math.Floor((a.X + t*(b.X-a.X)) / cw))
+				y := int(math.Floor((a.Y + t*(b.Y-a.Y)) / ch))
+				img.SetRGBA((x%w+w)%w, (y%h+h)%h, c)
+			}
+		}
+	}
+	for i := range ff.Features {
+		line(ff.Features[i].Backbone, previewBackbone)
+	}
+	for i := range r.Trenches.Trenches {
+		line(r.Trenches.Trenches[i].Backbone, previewTrench)
+	}
+	return encode(path, img)
+}
+
+// encode writes img as a PNG file.
+func encode(path string, img image.Image) error {
 	out, err := os.Create(path)
 	if err != nil {
 		return err

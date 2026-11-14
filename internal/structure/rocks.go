@@ -212,7 +212,7 @@ func classifyRocks(ctx context.Context, seed uint64, p RockParams, g continent.G
 			if in.IgneousProfile != nil {
 				reach = max(reach, in.IgneousProfile[1])
 			}
-			err := lineCells(ctx, dom, cols, rows, f.Backbone, reach, func(cell int, u float64) {
+			err := lineCells(ctx, dom, cols, rows, f.Backbone, reach, func(cell int, u, _ float64) {
 				ig := 0.0
 				if in.IgneousProfile != nil {
 					ig = fade(in.IgneousProfile, u)
@@ -278,13 +278,14 @@ func classifyRocks(ctx context.Context, seed uint64, p RockParams, g continent.G
 
 // lineCells calls fn for every cell whose center lies within reach half
 // widths (of the backbone's widest sample) of the backbone, with the cell's
-// cross-belt position u, equal to Line.Cross at the cell center.
+// cross-belt position u, equal to Line.Cross at the cell center, and the
+// arc-length position s of the backbone point nearest it.
 //
 // Instead of querying every segment for every cell, it measures each segment
 // only against the cells near it, on a local raster in the backbone's
 // unwrapped coordinates. A local raster wider or taller than the world holds
 // several images of one cell; the nearest is used.
-func lineCells(ctx context.Context, dom Domain, cols, rows int, backbone []Sample, reach float64, fn func(cell int, u float64)) error {
+func lineCells(ctx context.Context, dom Domain, cols, rows int, backbone []Sample, reach float64, fn func(cell int, u, s float64)) error {
 	cw, ch := dom.WidthKM/float64(cols), dom.HeightKM/float64(rows)
 	half := 0.0
 	box := Rect{math.Inf(1), math.Inf(1), math.Inf(-1), math.Inf(-1)}
@@ -331,10 +332,10 @@ func lineCells(ctx context.Context, dom Domain, cols, rows int, backbone []Sampl
 		}
 	}
 	l := NewLine(dom, backbone)
-	u := func(k int) float64 {
+	u := func(k int) (float64, float64) {
 		i := seg[k]
 		s := l.cum[i] + tt[k]*(l.cum[i+1]-l.cum[i])
-		return math.Sqrt(best[k]) / (l.WidthAt(s) / 2)
+		return math.Sqrt(best[k]) / (l.WidthAt(s) / 2), s
 	}
 	global := func(k int) int {
 		c, r := c0+k%nc, r0+k/nc
@@ -343,7 +344,8 @@ func lineCells(ctx context.Context, dom Domain, cols, rows int, backbone []Sampl
 	if nc <= cols && nr <= rows {
 		for k, d2 := range best {
 			if d2 <= R*R {
-				fn(global(k), u(k))
+				uk, sk := u(k)
+				fn(global(k), uk, sk)
 			}
 		}
 		return nil
@@ -365,7 +367,8 @@ func lineCells(ctx context.Context, dom Domain, cols, rows int, backbone []Sampl
 	}
 	slices.Sort(cells)
 	for _, g := range cells {
-		fn(g, u(nearest[g]))
+		uk, sk := u(nearest[g])
+		fn(g, uk, sk)
 	}
 	return nil
 }

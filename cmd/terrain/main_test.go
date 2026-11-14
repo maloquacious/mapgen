@@ -57,17 +57,19 @@ func TestCommand(t *testing.T) {
 	if got.Manifest.Seed != 9 || got.Manifest.SeedSource != terrain.SeedExplicit {
 		t.Errorf("seed %d from %s", got.Manifest.Seed, got.Manifest.SeedSource)
 	}
-	f, err := os.Open(filepath.Join(out, terrain.PreviewFile))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	img, err := png.Decode(f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if img.Bounds().Dx() != 48 || img.Bounds().Dy() != 24 {
-		t.Errorf("preview is %v", img.Bounds())
+	for _, name := range []string{terrain.PreviewFile, terrain.PreviewStructureFile} {
+		f, err := os.Open(filepath.Join(out, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		img, err := png.Decode(f)
+		f.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if img.Bounds().Dx() != 48 || img.Bounds().Dy() != 24 {
+			t.Errorf("%s is %v", name, img.Bounds())
+		}
 	}
 	if err := run(t.Context(), args); err == nil {
 		t.Error("replaced an existing output directory")
@@ -76,8 +78,10 @@ func TestCommand(t *testing.T) {
 	if err := run(t.Context(), []string{"--in", tdir, "--out", noPreview, "--png=false"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(noPreview, terrain.PreviewFile)); !os.IsNotExist(err) {
-		t.Error("wrote the preview with --png=false")
+	for _, name := range []string{terrain.PreviewFile, terrain.PreviewStructureFile} {
+		if _, err := os.Stat(filepath.Join(noPreview, name)); !os.IsNotExist(err) {
+			t.Errorf("wrote %s with --png=false", name)
+		}
 	}
 	// A structure artifact is not a trench artifact.
 	err = run(t.Context(), []string{"--in", sdir, "--out", filepath.Join(t.TempDir(), "wrong")})

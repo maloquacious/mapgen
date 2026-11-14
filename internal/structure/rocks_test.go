@@ -39,7 +39,7 @@ func TestClassifyRock(t *testing.T) {
 func lineCellsAgree(t *testing.T, dom Domain, cols, rows int, b []Sample, reach float64) int {
 	t.Helper()
 	got := map[int]float64{}
-	if err := lineCells(t.Context(), dom, cols, rows, b, reach, func(cell int, u float64) {
+	if err := lineCells(t.Context(), dom, cols, rows, b, reach, func(cell int, u, _ float64) {
 		if _, dup := got[cell]; dup {
 			t.Errorf("cell %d reported twice", cell)
 		}

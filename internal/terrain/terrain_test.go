@@ -4,6 +4,7 @@
 package terrain_test
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,31 +110,106 @@ func sameFiles(t *testing.T, a, b map[string]string) {
 	}
 }
 
+// The foundation keeps the provisional coast at 0 m; features change the
+// surface only within their reach.
 func TestFoundationKeepsProvisionalCoast(t *testing.T) {
 	in := inputDir(t)
 	r := generate(t, in, nil)
 	land := r.Structure.Land
-	for i, e := range r.Elevation {
+	fd := terrain.Foundation(r)
+	ff := r.Structure.Features
+	g := r.Manifest.Grid
+	reach := make([]bool, len(land))
+	for i := range ff.Features {
+		for k, in := range structure.Cover(ff.Domain, g.Columns, g.Rows, ff.Features[i].Shape(ff.Domain)) {
+			reach[k] = reach[k] || in
+		}
+	}
+	changed := 0
+	for i, e := range fd {
 		if (e > 0) != (land[i] == 1) || e == 0 {
-			t.Fatalf("cell %d: elevation %g, provisional land %d", i, e, land[i])
+			t.Fatalf("cell %d: foundation %g, provisional land %d", i, e, land[i])
 		}
-		if r.High[i] != e || r.Relief[i] != 0 || r.Above[i] != (land[i] == 1) {
-			t.Fatalf("cell %d: high %g, relief %g, above %v", i, r.High[i], r.Relief[i], r.Above[i])
+		if r.High[i] != r.Elevation[i] || r.Relief[i] != 0 {
+			t.Fatalf("cell %d: high %g, relief %g", i, r.High[i], r.Relief[i])
 		}
+		if r.Elevation[i] != e {
+			changed++
+			if !reach[i] {
+				t.Fatalf("cell %d beyond every envelope changed from %g to %g", i, e, r.Elevation[i])
+			}
+		}
+	}
+	if changed == 0 {
+		t.Error("the features changed nothing")
 	}
 	d := r.Diagnostics
-	if d.Shift.WaterToLand != 0 || d.Shift.LandToWater != 0 || d.Shift.LandCells != r.Manifest.ProvisionalLandCells {
+	if d.Shift.LandCells != r.Manifest.ProvisionalLandCells {
 		t.Errorf("shift %+v", d.Shift)
 	}
-	// Midway between the lowest land and the highest water.
-	if want := (d.ElevationLand.MinM + d.ElevationWater.MaxM) / 2; d.Shift.LevelM != want {
-		t.Errorf("level %g, want %g", d.Shift.LevelM, want)
+	above := 0
+	for i, a := range r.Above {
+		if a {
+			above++
+			if float64(r.Elevation[i]) < d.Shift.LevelM {
+				t.Fatalf("cell %d above the level at %g", i, r.Elevation[i])
+			}
+		} else if float64(r.Elevation[i]) > d.Shift.LevelM {
+			t.Fatalf("cell %d below the level at %g", i, r.Elevation[i])
+		}
 	}
-	if d.ElevationLand.Cells+d.ElevationWater.Cells != len(land) || d.ElevationLand.MaxM > 800*1.15 || d.ElevationWater.MinM < -5500 {
+	if above != d.Shift.LandCells {
+		t.Errorf("%d cells above the level, want %d", above, d.Shift.LandCells)
+	}
+	if d.ElevationLand.Cells+d.ElevationWater.Cells != len(land) || d.ElevationWater.MinM < -5500 {
 		t.Errorf("elevation statistics %+v %+v", d.ElevationLand, d.ElevationWater)
 	}
 	if r.Manifest.Seed != 7 || r.Manifest.SeedSource != terrain.SeedFromInput {
 		t.Errorf("seed %d from %s", r.Manifest.Seed, r.Manifest.SeedSource)
+	}
+}
+
+// Every fixture feature shows in the surface, and each core conforms to its
+// targets.
+func TestFixtureHandoff(t *testing.T) {
+	r := generate(t, inputDir(t), nil)
+	ff := r.Structure.Features
+	params := r.Manifest.RegionalParameters
+	if len(r.Diagnostics.Features) != len(ff.Features) {
+		t.Fatalf("%d feature diagnostics for %d features", len(r.Diagnostics.Features), len(ff.Features))
+	}
+	for k, d := range r.Diagnostics.Features {
+		f := &ff.Features[k]
+		if d.ID != f.ID || d.Core.Cells == 0 {
+			t.Errorf("feature %d: no core cells", f.ID)
+			continue
+		}
+		if f.Type == structure.TypeFault {
+			if r := params.FaultM[f.Sense]; d.OffsetM < r[0] || d.OffsetM > r[1] {
+				t.Errorf("fault %d: offset %g outside %v", f.ID, d.OffsetM, r)
+			}
+			continue
+		}
+		key := f.Type
+		if f.Type == structure.TypeMountainBelt || f.Type == structure.TypeBasin {
+			key += "/" + f.Kind
+		}
+		want := params.DefaultTargets[key]
+		if f.Targets != nil && f.Targets.RegionalElevationM != nil {
+			want.RegionalElevationM = *f.Targets.RegionalElevationM
+		}
+		if f.Targets != nil && f.Targets.ReliefM != nil {
+			want.ReliefM = *f.Targets.ReliefM
+		}
+		within := func(got *[2]float64, r [2]float64) bool { return got != nil && got[0] >= r[0] && got[1] <= r[1] }
+		if !within(d.RegionalM, want.RegionalElevationM) || !within(d.ReliefM, want.ReliefM) {
+			t.Errorf("feature %d: draws %v and %v outside %+v", f.ID, d.RegionalM, d.ReliefM, want)
+		}
+		// A plateau stands far above any lowland, so its core reaches its
+		// draw.
+		if f.Type == structure.TypePlateau && math.Abs(d.Core.MaxM-d.RegionalM[0]) > 1 {
+			t.Errorf("plateau %d: core %+v, draw %g", f.ID, d.Core, d.RegionalM[0])
+		}
 	}
 }
 
@@ -191,10 +267,11 @@ func TestSeed(t *testing.T) {
 	if b.Manifest.SeedSource != terrain.SeedExplicit {
 		t.Errorf("seed source %s", b.Manifest.SeedSource)
 	}
+	fa, fb := terrain.Foundation(a), terrain.Foundation(b)
 	differ := 0
 	for i := range a.Elevation {
-		if (a.Elevation[i] > 0) != (b.Elevation[i] > 0) {
-			t.Fatalf("cell %d changed sides with the seed", i)
+		if (fa[i] > 0) != (fb[i] > 0) {
+			t.Fatalf("cell %d of the foundation changed sides with the seed", i)
 		}
 		if a.Elevation[i] != b.Elevation[i] {
 			differ++
