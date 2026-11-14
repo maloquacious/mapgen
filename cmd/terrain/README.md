@@ -10,12 +10,12 @@ go run ./cmd/terrain --in tmp/trench --png-scale 3 --out tmp/terrain
 ```
 
 The design is in [Terrain Generation Design.md](<../../Terrain Generation Design.md>).
-This covers implementation steps 1 to 5 of that design: the continental foundation, the artifact, the regional surface each feature pulls the foundation toward, belt components, volcanic peaks, and trench depressions, subcell sampling, and residual detail.
+This covers implementation steps 1 to 6 of that design: the continental foundation, the artifact, the regional surface each feature pulls the foundation toward, belt components, volcanic peaks, and trench depressions, subcell sampling, residual detail, and recentering.
 
 ## Not implemented yet
 
 - `preview-relief.png` and `preview-change.png`.
-- `--recenter` and `--config`.
+- `--config`.
 
 ## Flags
 
@@ -26,6 +26,7 @@ This covers implementation steps 1 to 5 of that design: the continental foundati
 | `--seed` | Terrain seed, unsigned 64-bit. If omitted, the trench input's seed is used; the manifest records the seed and which of the two it was |
 | `--png` | Write `preview.png` and `preview-structure.png`; default true |
 | `--png-scale` | Sampling interval in cells for the previews; default 1 |
+| `--recenter` | Translate the complete result, structure and trench records included, to center the largest landmass terrain implies at the provisional fraction; off by default |
 | `--residual` | Add residual detail; default true. `--residual=false` publishes the structured surface alone |
 | `--workers` | Worker goroutines; default one per CPU. Never changes the output |
 | `--version` | Print the generator version |
@@ -96,14 +97,21 @@ Its amplitude is 10 percent of a cell's structured relief, at least 20 m, but th
 Shorter wavelengths add half the amplitude to `relief` and a quarter to `high`.
 The manifest records whether it was added as `residual`, and the values as `residual_parameters`.
 
+## Recentering
+
+`--recenter` centers the largest eight-connected component of the cells above the provisional-fraction quantile: the land terrain implies, not the provisional land.
+The result is generated in the input's frame and then moved by whole cells; nothing is regenerated.
+The structure records, trenches, ridges, and peaks move with it.
+The moved records are described as a trench manifest recentered by the combined shift, so they load through the trench and structure checks; `recentering` gives this stage's own shift.
+
 ## Output
 
 | File | Content |
 | --- | --- |
-| `manifest.json` | Format `mapgen-terrain-v6`, versions, the input trench manifest (which records the structure manifest) and its checksum, seed, grid, datum, parameters, retained records, and checksums |
+| `manifest.json` | Format `mapgen-terrain-v7`, the recentering record, the recentered records manifest when the records moved, versions, the input trench manifest (which records the structure manifest) and its checksum, seed, grid, datum, parameters, retained records, and checksums |
 | `elevation.f32`, `high.f32`, `relief.f32` | Float32 rasters, row-major, row 0 at the north |
-| `features.json`, `provinces.json`, `provinces.u32`, `provisional-land.u8`, `rock.u8`, `pressure.f32`, `shear.f32`, `igneous.f32`, `rock-noise.f32` | The structure records, byte for byte |
-| `trenches.json` | The trench records, byte for byte |
+| `features.json`, `provinces.json`, `provinces.u32`, `provisional-land.u8`, `rock.u8`, `pressure.f32`, `shear.f32`, `igneous.f32`, `rock-noise.f32` | The structure records, byte for byte unless recentering moved them |
+| `trenches.json` | The trench records, byte for byte unless recentering moved them |
 | `ridges.json` | Ridge chains and branches, troughs, corridors with their saddles, and volcanic peaks, in km, keyed by parent feature |
 | `diagnostics.json` | Elevation and relief statistics on provisional land and water, the shift at the provisional fraction, for each feature its drawn targets and the elevation of its core (the cells where its weight is at least 0.9; a rift's shoulders), counts of the ridge records, and for each trench its drawn floor and axis elevation |
 | `preview.png` | Hypsometric tint with hill shading, and the coast at the provisional fraction as a line |

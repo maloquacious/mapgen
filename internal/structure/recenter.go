@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 
 	"github.com/maloquacious/mapgen/internal/continent"
 	"github.com/maloquacious/mapgen/internal/fracture"
@@ -75,6 +76,24 @@ func (r *Result) Recenter(ctx context.Context) (Recentering, error) {
 	return step, translate(ctx, r, c.X, c.Y)
 }
 
+// RecenterBy translates a result read with LoadRecords by a later stage's
+// recentering step, and accumulates the step into the manifest's
+// Recentering, as Recenter does with its own: the accumulated record takes
+// the step's diagnostics and the summed shift.
+func (r *Result) RecenterBy(ctx context.Context, step Recentering) error {
+	if !step.Applied || step.ShiftX == 0 && step.ShiftY == 0 {
+		return nil
+	}
+	g := r.Manifest.Grid
+	acc := step
+	if prev := r.Manifest.Recentering; prev.Applied {
+		acc.ShiftX, acc.ShiftY = (prev.ShiftX+step.ShiftX)%g.Columns, (prev.ShiftY+step.ShiftY)%g.Rows
+		acc.ShiftXKM, acc.ShiftYKM = float64(acc.ShiftX)*g.CellWidthKM, float64(acc.ShiftY)*g.CellHeightKM
+	}
+	r.Manifest.Recentering = acc
+	return translate(ctx, r, step.ShiftX, step.ShiftY)
+}
+
 // record describes a translation by (x, y) cells, with c's diagnostics.
 func record(g continent.Grid, c fracture.Centering, x, y int) Recentering {
 	return Recentering{
@@ -93,14 +112,16 @@ func translate(ctx context.Context, r *Result, cx, cy int) error {
 	c := struct{ X, Y int }{cx, cy}
 	dx, dy := float64(c.X)*g.CellWidthKM, float64(c.Y)*g.CellHeightKM
 	cols, rows := g.Columns, g.Rows
-	r.Land = slide(r.Land, cols, rows, c.X, c.Y)
-	r.Owner = slide(r.Owner, cols, rows, c.X, c.Y)
+	// Rasters move in place, so recentering a full-size result needs no
+	// second copy of each.
+	Rotate(r.Land, cols, rows, c.X, c.Y)
+	Rotate(r.Owner, cols, rows, c.X, c.Y)
 	if r.Rock != nil {
-		r.Rock = slide(r.Rock, cols, rows, c.X, c.Y)
+		Rotate(r.Rock, cols, rows, c.X, c.Y)
 	}
 	for _, fields := range []map[string]*fracture.FractureField{r.Fields, r.Geology} {
-		for name, f := range fields {
-			fields[name] = f.Slide(c.X, c.Y)
+		for _, f := range fields {
+			Rotate(f.Values, f.Columns, f.Rows, c.X, c.Y)
 		}
 	}
 	if err := ctx.Err(); err != nil {
@@ -125,18 +146,23 @@ func translate(ctx context.Context, r *Result, cx, cy int) error {
 	return nil
 }
 
-// slide returns a copy of a row-major raster with cell (col, row) moved to
-// ((col+dx) mod cols, (row+dy) mod rows).
-func slide[T any](in []T, cols, rows, dx, dy int) []T {
-	out := make([]T, len(in))
+// Rotate moves cell (col, row) of a row-major raster to
+// ((col+dx) mod cols, (row+dy) mod rows), in place.
+func Rotate[T any](v []T, cols, rows, dx, dy int) {
 	dx, dy = (dx%cols+cols)%cols, (dy%rows+rows)%rows
-	for row := range rows {
-		src := in[row*cols : (row+1)*cols]
-		dst := out[(row+dy)%rows*cols:][:cols]
-		copy(dst[dx:], src[:cols-dx])
-		copy(dst[:dx], src[cols-dx:])
+	// Rotating right by k is reversing the whole, then each part.
+	right := func(v []T, k int) {
+		if k == 0 {
+			return
+		}
+		slices.Reverse(v)
+		slices.Reverse(v[:k])
+		slices.Reverse(v[k:])
 	}
-	return out
+	right(v, dy*cols)
+	for row := range rows {
+		right(v[row*cols:(row+1)*cols], dx)
+	}
 }
 
 // wraps returns the whole number of periods k such that v - k*period lies in

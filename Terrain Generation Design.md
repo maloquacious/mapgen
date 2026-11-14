@@ -314,7 +314,7 @@ The order of draws within each stream is part of `terrain-v1`; changing it chang
 
 ## Saved artifact
 
-The format is `mapgen-terrain-v6`; v2 read a trench checkpoint instead of a structure checkpoint, v3 added the regional surface, v4 belt components, peaks, trench depressions, and `ridges.json`, v5 subcell sampling with real high and relief, and v6 residual detail and plateau detail.
+The format is `mapgen-terrain-v6`; v2 read a trench checkpoint instead of a structure checkpoint, v3 added the regional surface, v4 belt components, peaks, trench depressions, and `ridges.json`, v5 subcell sampling with real high and relief, v6 residual detail and plateau detail, and v7 recentering.
 
 | Content | Purpose |
 | --- | --- |
@@ -343,7 +343,13 @@ Peak memory should stay under the cylindrical specification's 2 GB target; the f
 Terrain is toroidal, so `--recenter` translates the complete result by whole cells, exactly as structure does: rasters shift cyclically, feature, ridge, and province-seed geometry moves by the same distance in km and is renormalized to the base domain, and IDs and keys are kept.
 The result is generated in the input's frame and then translated; nothing is regenerated.
 The landmass centered is the largest eight-connected component of the cells above the provisional-fraction quantile, the coast terrain implies, so a recentered terrain is centered on its own land rather than the provisional land.
-The manifest's `recentering` record is always present, as in structure.
+The manifest's `recentering` record is always present, as in structure, and gives this stage's shift relative to its trench input.
+
+The retained records move too: the structure records by structure's own translation, with the step accumulated into their manifest's recentering; the trench records, ridges, troughs, and corridors by the same distance in km, each backbone renormalized; saddles and peaks into the base domain.
+When the shift is not zero the manifest adds `recentered_records`: the input trench manifest as the trench stage would have written it had it recentered by the combined shift, its own `recentered_records` the moved structure manifest.
+So `trench.LoadRecords` verifies the moved records with its usual checks, and Load accepts them only if they differ from the input trench manifest in nothing but the record files and the accumulated recentering.
+With a zero shift the records are retained byte for byte.
+Rasters rotate in place, so recentering a full-size result does not keep a second copy of each.
 
 ## Previews and acceptance
 
@@ -408,7 +414,7 @@ The terrain-mode artifact carries the clamped elevation, high, and relief fields
 4. **Subcell rasterization.** Done.
    The 4 by 4 sampling, high and relief, the subcell relief model, the spatial index, and parallel tiles with the worker-count test.
 5. **Residual detail** with its bounds tests. Done, with plateau rolling detail and rims.
-6. **Recentering.**
+6. **Recentering.** Done.
 7. **Landmask terrain-input mode.**
 
 ### Prerequisites in structure and trench

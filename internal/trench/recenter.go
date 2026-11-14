@@ -44,6 +44,15 @@ func recenter(ctx context.Context, r *Result) error {
 	return nil
 }
 
+// Translate moves every trench by (dx, dy) km, each backbone then
+// renormalized so its first vertex is in the base domain, as recentering
+// does. Later stages that retain the records use it.
+func (tf *TrenchFile) Translate(dx, dy float64) {
+	for i := range tf.Trenches {
+		translate(tf.Domain, tf.Trenches[i].Backbone, dx, dy)
+	}
+}
+
 // translate moves a backbone by (dx, dy) km, then by whole world widths and
 // heights so its first vertex lies in the base domain, as structure moves
 // its features.

@@ -218,3 +218,21 @@ func TestResolutionIndependence(t *testing.T) {
 		t.Errorf("areas differ: %g and %g square km", a, b)
 	}
 }
+
+// Rotate moves every cell by the shift, wrapping both axes, in place.
+func TestRotate(t *testing.T) {
+	const cols, rows = 7, 5
+	for _, sh := range [][2]int{{0, 0}, {3, 0}, {0, 2}, {6, 4}, {-1, -3}, {15, 11}} {
+		v := make([]int, cols*rows)
+		for i := range v {
+			v[i] = i
+		}
+		structure.Rotate(v, cols, rows, sh[0], sh[1])
+		for i := range cols * rows {
+			c, r := ((i%cols+sh[0])%cols+cols)%cols, ((i/cols+sh[1])%rows+rows)%rows
+			if v[r*cols+c] != i {
+				t.Fatalf("shift %v: cell %d holds %d at (%d, %d)", sh, i, v[r*cols+c], c, r)
+			}
+		}
+	}
+}

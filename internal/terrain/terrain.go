@@ -42,7 +42,7 @@ import (
 )
 
 const (
-	Format          = "mapgen-terrain-v6"
+	Format          = "mapgen-terrain-v7"
 	Topology        = "torus: x and y wrap; the map may be recentered until climate"
 	Datum           = "provisional: 0 m is the provisional coast of the structure records, not sea level"
 	SeedExplicit    = "explicit"
@@ -107,6 +107,14 @@ type Manifest struct {
 	// and trenches, sampled within each cell they reach.
 	FeatureSynthesis string `json:"feature_synthesis"`
 	Ridges           File   `json:"ridges"`
+	// Recentering records this stage's translation, relative to the trench
+	// input; it is always present.
+	Recentering structure.Recentering `json:"recentering"`
+	// RecenteredRecords describes the retained structure and trench records
+	// when this stage moved them: the input trench manifest as if the
+	// trench stage had recentered by the combined shift. It is absent when
+	// the records are the input's bytes.
+	RecenteredRecords *trench.Manifest `json:"recentered_records,omitzero"`
 	// Retained lists the structure and trench records copied unchanged, as
 	// the input manifest describes them.
 	Retained    []File            `json:"retained"`
@@ -199,8 +207,11 @@ type Options struct {
 	// NoResidual leaves out residual detail, publishing the structured
 	// surface alone.
 	NoResidual bool
-	Seed       *uint64 // terrain seed; nil uses the trench seed
-	Version    string  // generator version
+	// Recenter translates the complete result to center the largest
+	// landmass terrain implies at the provisional fraction.
+	Recenter bool
+	Seed     *uint64 // terrain seed; nil uses the trench seed
+	Version  string  // generator version
 }
 
 func checksum(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
@@ -288,6 +299,12 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 	r.Elevation, r.High, r.Relief, r.Ridges = syn.elevation, syn.high, syn.relief, syn.ridges
 	r.Diagnostics.Features, r.Diagnostics.Trenches, r.Diagnostics.Ridges = syn.features, syn.trenches, syn.ridges.count()
 	r.diagnose()
+	if o.Recenter {
+		if err := recenter(ctx, r); err != nil {
+			return nil, err
+		}
+		r.diagnose()
+	}
 	return r, ctx.Err()
 }
 
@@ -382,13 +399,32 @@ func Write(ctx context.Context, dir string, r *Result, previewScale int) error {
 		}
 		m.Fields = append(m.Fields, fd)
 	}
-	for _, f := range m.Retained {
-		b, ok := r.records[f.File]
-		if !ok || checksum(b) != f.SHA256 {
-			return fmt.Errorf("retained record %s is missing or changed", f.File)
-		}
-		if err := os.WriteFile(filepath.Join(tmp, f.File), b, 0o644); err != nil {
+	if m.RecenteredRecords != nil {
+		// Moved records are written afresh and described anew.
+		rm, err := structure.WriteRecords(tmp, r.Structure)
+		if err != nil {
 			return err
+		}
+		tdata, err := r.Trenches.Marshal()
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(tmp, trench.TrenchesFile), tdata, 0o644); err != nil {
+			return err
+		}
+		tm := *m.RecenteredRecords
+		tm.RecenteredRecords, tm.Retained = &rm, rm.Records()
+		tm.Trenches.SHA256 = checksum(tdata)
+		m.RecenteredRecords, m.Retained = &tm, tm.Records()
+	} else {
+		for _, f := range m.Retained {
+			b, ok := r.records[f.File]
+			if !ok || checksum(b) != f.SHA256 {
+				return fmt.Errorf("retained record %s is missing or changed", f.File)
+			}
+			if err := os.WriteFile(filepath.Join(tmp, f.File), b, 0o644); err != nil {
+				return err
+			}
 		}
 	}
 	diagnostics, err := json.Marshal(r.Diagnostics, json.Deterministic(true), jsontext.WithIndent("  "))
@@ -470,7 +506,10 @@ func Load(ctx context.Context, dir string) (*Result, error) {
 	if m.FeatureSynthesis != SubcellAlgorithm {
 		return nil, fmt.Errorf("unsupported feature synthesis %q", m.FeatureSynthesis)
 	}
-	tm := m.Input.Manifest
+	if err := m.checkRecentering(); err != nil {
+		return nil, err
+	}
+	tm := m.RecordsManifest()
 	if !slices.Equal(m.Retained, tm.Records()) {
 		return nil, fmt.Errorf("retained records do not match the input manifest")
 	}

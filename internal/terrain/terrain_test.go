@@ -4,6 +4,7 @@
 package terrain_test
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -24,13 +25,17 @@ func inputDir(t *testing.T) string { return inputDirOpts(t, false) }
 
 // inputDirOpts is inputDir with the continents left off center and the
 // trench stage recentering them, when recenter is set.
-func inputDirOpts(t *testing.T, recenter bool) string {
+func inputDirOpts(t *testing.T, recenter bool) string { return inputDirFull(t, !recenter, recenter) }
+
+// inputDirFull is inputDir with the continents centered or not, and the
+// trench stage recentering or not.
+func inputDirFull(t *testing.T, centered, recenter bool) string {
 	t.Helper()
 	p, err := fracture.DefaultParams(42, 96, 48, 6)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.Recenter = !recenter
+	p.Recenter = centered
 	cr, err := fracture.Generate(t.Context(), p)
 	if err != nil {
 		t.Fatal(err)
@@ -389,4 +394,88 @@ func TestRecenteredTrenchInput(t *testing.T) {
 			t.Errorf("%s was not retained unchanged", f.File)
 		}
 	}
+}
+
+// Recentering moves the complete result by whole cells to center the land
+// terrain implies, and the moved records still load through the trench
+// and structure checks.
+func TestRecenter(t *testing.T) {
+	in := inputDirFull(t, false, false)
+	base := generate(t, in, nil)
+	r, err := terrain.Generate(t.Context(), terrain.Options{In: in, Recenter: true, Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := r.Manifest.Grid
+	c := r.Manifest.Recentering
+	f := &fracture.FractureField{Columns: g.Columns, Rows: g.Rows, WidthKM: g.WidthKM, HeightKM: g.HeightKM, Values: base.Elevation}
+	want, err := fracture.FindCentering(t.Context(), f, r.Manifest.ProvisionalLandFraction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Applied || c.ShiftX != want.X || c.ShiftY != want.Y || c.ShiftX == 0 && c.ShiftY == 0 {
+		t.Fatalf("shift (%d, %d), want (%d, %d)", c.ShiftX, c.ShiftY, want.X, want.Y)
+	}
+	for _, pair := range [][2][]float32{{base.Elevation, r.Elevation}, {base.High, r.High}, {base.Relief, r.Relief}} {
+		for i, v := range pair[0] {
+			col, row := (i%g.Columns+c.ShiftX)%g.Columns, (i/g.Columns+c.ShiftY)%g.Rows
+			if pair[1][row*g.Columns+col] != v {
+				t.Fatalf("cell %d did not move with the shift", i)
+			}
+		}
+	}
+	d := r.Diagnostics
+	if d.Shift != base.Diagnostics.Shift {
+		t.Errorf("shift diagnostics changed: %+v, %+v", d.Shift, base.Diagnostics.Shift)
+	}
+	moved := func(a, b float64, size float64, by float64) bool {
+		v := math.Mod(a+by-b+2*size, size)
+		return min(v, size-v) < 1e-6
+	}
+	for i, p := range base.Ridges.Peaks {
+		q := r.Ridges.Peaks[i]
+		if !moved(p.X, q.X, g.WidthKM, c.ShiftXKM) || !moved(p.Y, q.Y, g.HeightKM, c.ShiftYKM) {
+			t.Errorf("peak %d at (%g, %g), from (%g, %g)", p.ID, q.X, q.Y, p.X, p.Y)
+		}
+	}
+	out := write(t, r)
+	loaded, err := terrain.Load(t.Context(), out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Manifest.RecenteredRecords == nil || loaded.Manifest.Recentering != c {
+		t.Errorf("recentering %+v, records %v", loaded.Manifest.Recentering, loaded.Manifest.RecenteredRecords != nil)
+	}
+	sameFiles(t, files(t, out), files(t, write(t, loaded)))
+	// The structure records moved as structure would move them.
+	if sr := loaded.Structure.Manifest.Recentering; sr.ShiftX%g.Columns != c.ShiftX || sr.ShiftY%g.Rows != c.ShiftY {
+		t.Errorf("structure records recentered by (%d, %d)", sr.ShiftX, sr.ShiftY)
+	}
+	// A recentering record that does not match the records is rejected.
+	data, err := os.ReadFile(filepath.Join(out, terrain.ManifestFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := strings.Replace(string(data), fmt.Sprintf(`"shift_x": %d,`, c.ShiftX), fmt.Sprintf(`"shift_x": %d,`, (c.ShiftX+1)%g.Columns), 1)
+	if bad == string(data) {
+		t.Fatal("no shift to change")
+	}
+	if err := os.WriteFile(filepath.Join(out, terrain.ManifestFile), []byte(bad), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := terrain.Load(t.Context(), out); err == nil {
+		t.Error("loaded a recentering that does not match the records")
+	}
+
+	// A trench input that was itself recentered accumulates.
+	chain := inputDirOpts(t, true)
+	r2, err := terrain.Generate(t.Context(), terrain.Options{In: chain, Recenter: true, Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out2 := write(t, r2)
+	if _, err := terrain.Load(t.Context(), out2); err != nil {
+		t.Fatalf("chained recentering: %v (shift %+v)", err, r2.Manifest.Recentering)
+	}
+	t.Logf("shifts (%d, %d) and chained (%d, %d)", c.ShiftX, c.ShiftY, r2.Manifest.Recentering.ShiftX, r2.Manifest.Recentering.ShiftY)
 }
