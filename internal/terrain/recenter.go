@@ -71,7 +71,7 @@ func recenter(ctx context.Context, r *Result) error {
 	tm.Recentering = acc
 	sm := r.Structure.Manifest
 	tm.RecenteredRecords = &sm
-	r.Manifest.RecenteredRecords, r.records = &tm, nil
+	r.Manifest.RecenteredRecords, r.source = &tm, ""
 	return ctx.Err()
 }
 

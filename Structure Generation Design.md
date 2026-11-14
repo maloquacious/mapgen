@@ -80,7 +80,9 @@ Features may cross either seam.
 The map can be recentered at any stage before climate, so every stage up to that point must wrap in both directions; otherwise a recentered map would show breaks along the old edges.
 The north and south edges become real boundaries when climate is generated, and no recentering is available from that stage on.
 
-Use the full-resolution highest-affinity cells to establish a provisional mask, with deterministic index tie handling.
+Establish a provisional mask at full resolution with one connected ocean, applying section 7 of the cylindrical specification to affinity: take the `round(fraction * cells)` highest-affinity cells as land, ties by index; take the largest eight-connected component of the rest, on the torus; and grow it to exactly the rest through a frontier keyed by affinity then index.
+Low affinity enclosed by land stays land, and the ocean takes the lowest-affinity cells on its edge instead, so the provisional coast is an ocean coast: terrain builds sea floor only where the sea is, and `landmask`'s connectivity repair measures what terrain features do rather than lakes in the affinity field.
+The diagnostics record the components, the largest, and the cells that differ from the plain highest-affinity selection (on the full-size seed 42 map, 24,648 components and 615,234 cells).
 This mask is diagnostic placement data.
 Neither it nor zero affinity is an authoritative sea-level threshold.
 
@@ -194,7 +196,7 @@ Ore placement remains a later stage and does not belong in structure.
 
 ## Saved artifact
 
-Use a versioned format, initially `mapgen-structure-v1`, with these logical contents:
+Use a versioned format, `mapgen-structure-v2` (v1 selected the provisional mask by affinity alone, without a connected ocean), with these logical contents:
 
 | Content | Purpose |
 | --- | --- |
@@ -647,7 +649,7 @@ It preserves relationships and records the applied coordinate transform.
 The mask, retained fields, province labels, feature geometry, and previews must all agree after translation.
 
 Because structure is toroidal, a translation by whole cells on either axis is exact: it cuts nothing and changes no adjacency.
-`--recenter` centers the largest provisional land component, using the same toroidal, eight-neighbor convention as `continents` and `landmask`.
+`--recenter` centers the largest component of the provisional mask, using the same toroidal, eight-neighbor convention as `continents` and `landmask`, so it moves an artifact exactly as a later stage recentering the retained records would.
 Rasters shift cyclically.
 Feature and province-seed geometry shifts by the same distance in kilometers, then each polyline or ring is moved by whole world widths and heights so its first vertex is back in the base domain.
 IDs, keys, and component numbers assigned before the shift are kept; they are not renumbered from the new cell order.

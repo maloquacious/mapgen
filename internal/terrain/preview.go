@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 
+	"github.com/maloquacious/mapgen/internal/continent"
 	"github.com/maloquacious/mapgen/internal/structure"
 )
 
@@ -86,9 +87,19 @@ const shadeExaggeration = 20
 // level landmask's quantile would move to 0 m, and the coast that level
 // implies as a line, sampling every scale-th cell.
 func writePreview(ctx context.Context, path string, r *Result, scale int) error {
-	g := r.Manifest.Grid
+	img, err := Hypsometric(ctx, r.Manifest.Grid, r.Elevation, r.Diagnostics.Shift.LevelM, r.Above, scale)
+	if err != nil {
+		return err
+	}
+	return encode(path, img)
+}
+
+// Hypsometric draws elev, relative to level, in a hypsometric tint with hill
+// shading, the cells marked land in the land tint and the others in the
+// water tint, with the boundary between them as a line, sampling every
+// scale-th cell of the grid.
+func Hypsometric(ctx context.Context, g continent.Grid, elev []float32, level float64, land []bool, scale int) (*image.RGBA, error) {
 	w, h := (g.Columns-1)/scale+1, (g.Rows-1)/scale+1
-	level := r.Diagnostics.Shift.LevelM
 	at := func(x, y int) int { return ((y%h+h)%h)*scale*g.Columns + ((x%w+w)%w)*scale }
 	// Sample spacing in m; the last sample on an axis may be closer to the
 	// first, which only affects shading along the seam.
@@ -98,29 +109,29 @@ func writePreview(ctx context.Context, path string, r *Result, scale int) error 
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	for y := range h {
 		if err := ctx.Err(); err != nil {
-			return err
+			return nil, err
 		}
 		for x := range w {
 			i := at(x, y)
-			e := float64(r.Elevation[i]) - level
+			e := float64(elev[i]) - level
 			var c [3]float64
-			if r.Above[i] {
+			if land[i] {
 				c = tint(landTint, e)
 			} else {
 				c = tint(waterTint, e)
 			}
-			gx := shadeExaggeration * float64(r.Elevation[at(x+1, y)]-r.Elevation[at(x-1, y)]) / (2 * dx)
-			gy := shadeExaggeration * float64(r.Elevation[at(x, y+1)]-r.Elevation[at(x, y-1)]) / (2 * dy)
+			gx := shadeExaggeration * float64(elev[at(x+1, y)]-elev[at(x-1, y)]) / (2 * dx)
+			gy := shadeExaggeration * float64(elev[at(x, y+1)]-elev[at(x, y-1)]) / (2 * dy)
 			// The surface normal is (-gx, -gy, 1), normalized.
 			shade := (-gx*lx - gy*ly + lz) / math.Sqrt(gx*gx+gy*gy+1) / lz
 			px := rgba(c, min(max(shade, 0.55), 1.35))
-			if r.Above[i] != r.Above[at(x+1, y)] || r.Above[i] != r.Above[at(x, y+1)] {
+			if land[i] != land[at(x+1, y)] || land[i] != land[at(x, y+1)] {
 				px = previewCoastLine
 			}
 			img.SetRGBA(x, y, px)
 		}
 	}
-	return encode(path, img)
+	return img, nil
 }
 
 // writeStructurePreview draws the surface in the same tint without shading,

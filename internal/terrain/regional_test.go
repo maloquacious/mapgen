@@ -189,6 +189,31 @@ func TestRiftProfile(t *testing.T) {
 	}
 }
 
+// A rift's axis stops RiftFloorM below the datum on land, and below the
+// foundation at sea.
+func TestRiftFloor(t *testing.T) {
+	const a = 0.4
+	rf := structure.Feature{ID: 1, Type: structure.TypeRift, Key: new(uint64(1)), AxisFraction: new(a),
+		Backbone: []structure.Sample{{X: 30, Y: 150, WidthKM: 150}, {X: 270, Y: 150, WidthKM: 150}, {X: 510, Y: 150, WidthKM: 150}},
+		Targets:  &structure.Targets{RegionalElevationM: rng(500, 500), ReliefM: rng(2000, 2000)}}
+	floor := DefaultRegionalParams().RiftFloorM
+	for _, base := range []float32{200, -500} {
+		out, _ := surface(t, 1, flat(base), rf)
+		l := structure.NewLine(testDom, rf.Backbone)
+		for i, e := range out {
+			u := l.Cross(center(i))
+			if u >= a {
+				continue
+			}
+			shoulder := max(500, float64(base))
+			want := shoulder - kernel(u/a)*(shoulder-(min(float64(base), 0)-floor))
+			if !near(float64(e), want) {
+				t.Fatalf("base %g, cell %d at cross position %g: %g, want %g", base, i, u, e, want)
+			}
+		}
+	}
+}
+
 // Two crossing belts reach the larger uplift plus a quarter of the smaller,
 // and a basin inside a belt's flank lowers it to the basin's level.
 func TestCombination(t *testing.T) {

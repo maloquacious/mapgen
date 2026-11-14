@@ -39,10 +39,13 @@ Contracts and invariants (wrapping, determinism, land fraction, artifact formats
 
 1. `cmd/continents`: builds continental affinity fields with the rectangular fracture generator (`fracture-rect-v1`), optionally recentering the largest landmass.
    Writes `manifest.json`, raw float32 rasters (`affinity`, `continental`, `coast`), and `preview.png`.
-2. `cmd/landmask`: selects exactly `round(fraction * cells)` land cells by affinity from a `continents` artifact and writes a self-contained land/ocean checkpoint.
+2. `cmd/landmask`: freezes the coastline.
+   From a `terrain` artifact (the default pipeline, run after terrain) it selects sea level as the elevation quantile, makes the ocean one connected body, requires a repair fraction of at most 0.01, clamps ocean to −1 m and other cells to +1 m (no cell moving more than 500 m), and writes the frozen ocean mask with the clamped fields and the retained records.
+   From a `continents` artifact it selects exactly `round(fraction * cells)` land cells by affinity, for inspection.
    See [cmd/landmask/README.md](cmd/landmask/README.md).
 
 3. `cmd/structure`: attaches geological features (belts, rifts, arcs, faults, plateaus, basins) to a `continents` artifact and writes a self-contained structure checkpoint.
+   Its provisional mask is the highest-affinity cells with the ocean made one connected body, by the rule landmask applies to elevation.
    It partitions the map into geological provinces and interprets the provisional coast (coast distance and coast chains on a 50 km working grid). Features come from an explicit fixture file or from automatic placement, which places collision belts with plateaus and foreland basins, active margins with inland basins, intermontane basins inside wide belts, old orogens (some interrupted), rifts, island arcs, interior basins, and faults.
    Rock classification converts features and provinces to geological proxies (pressure, shear, igneous influence) and classifies every cell as sedimentary, igneous, or metamorphic.
    `--recenter` translates the complete result to center the largest landmass.
@@ -59,19 +62,20 @@ Contracts and invariants (wrapping, determinism, land fraction, artifact formats
    Cells that features reach are sampled at 4 x 4 points for mean elevation, high, and relief, in parallel tiles whose result does not depend on the worker count.
    Residual noise (no wavelength under four cells, at most 10 percent of relief, grain along belts) is added unless `--residual=false`.
    `--recenter` translates the complete result, structure and trench records included, to center the land terrain implies.
-   Elevations are relative to the provisional coast at 0 m; the landmask terrain-input mode comes next.
+   A rift's axis stops 300 m below the lower of the foundation and the datum.
+   Elevations are relative to the provisional coast at 0 m; `landmask` then chooses sea level and freezes the coast.
    See [cmd/terrain/README.md](cmd/terrain/README.md).
 
-Later stages (terrain features, the terrain-based landmask, drainage, climate, biomes, resources) are not implemented yet.
+Later stages (drainage, climate, biomes, resources) are not implemented yet.
 
-The planned generation order is `continents → structure → trench → terrain → landmask → drainage → climate → ecosystems`, with resources depending on geology. The current affinity-based landmask command remains useful for inspection; final coastline acceptance will require a terrain-input mode. Do not assume its present continental-input artifact freezes coastlines before geological structure in the default pipeline.
+The planned generation order is `continents → structure → trench → terrain → landmask → drainage → climate → ecosystems`, with resources depending on geology. In the default pipeline `landmask` takes terrain input and freezes the coastline; its continental-input mode remains for inspection and does not freeze coastlines before geological structure.
 
 ## Layout
 
 - `version.go`: module version (package `mapgen`).
-- `internal/fracture`: the disc-sum fracture field generator and recentering.
+- `internal/fracture`: the disc-sum fracture field generator, recentering, and the connected-ocean selection structure and landmask share.
 - `internal/continent`: storing and loading the continental artifact.
-- `internal/landmask`: creating, storing, and loading the land/ocean artifact.
+- `internal/landmask`: the land/ocean artifact, from affinity or from terrain elevation (sea level, the connected ocean, the clamp to the frozen coast).
 - `internal/structure`: feature records and their validation, toroidal geometry queries, province partitioning, coast interpretation, automatic placement, geology proxies and rock classification, recentering, and the structure artifact.
 - `internal/trench`: subduction polarity, trench placement and clipping, trench records and their validation, recentering, and the trench artifact.
 - `internal/terrain`: the coast distance transform, the continental foundation, the regional surface, belt components and ridge records, trench depressions, tiled subcell rasterization, residual detail, recentering, and the terrain artifact.

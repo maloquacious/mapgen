@@ -64,7 +64,7 @@ On the full-size seed 42 map, provisional land is about 54 percent sedimentary, 
 
 ## Recentering
 
-`--recenter` centers the largest provisional landmass with the convention `continents` and `landmask` use: eight-connected land on the torus, moved by whole cells to put its circular mean at the center.
+`--recenter` centers the largest landmass of the provisional mask with the convention `continents` and `landmask` use: eight-connected land on the torus, moved by whole cells to put its circular mean at the center.
 The result is generated first and then translated, so it is the unrecentered artifact moved by whole cells: every raster shifts cyclically, feature geometry and province seeds move by the same distance in km, and IDs, keys, rock noise, and rocks are kept, not regenerated.
 The shift is relative to the continental input and is recorded under `recentering` in the manifest; without the flag the record says `applied: false`.
 An input that `continents` already centered usually moves by a cell or two, or not at all.
@@ -85,13 +85,13 @@ The `features.json` of any structure artifact is itself a valid fixture for the 
 ## Output
 
 - `features.json`: the authoritative feature records, in canonical form. Each lists the provinces under its envelope.
-- `provisional-land.u8`: one byte per cell, 1 for provisional land. This is placement data, not the final landmask.
+- `provisional-land.u8`: one byte per cell, 1 for provisional land. This is placement data, not the final landmask. It is the highest-affinity cells, except that the ocean is made one connected body, as `landmask` does with elevation: low affinity enclosed by land stays land, and the ocean takes the lowest-affinity cells on its edge instead. Load rejects a mask whose ocean is not connected.
 - `provinces.json` and `provinces.u32`: the geological provinces and the province ID of every cell, as little-endian uint32. Every cell has an owner. Islands and enclosed waters under 20,000 square km belong to the province around them.
 - `affinity.f32`, `continental.f32`, `coast.f32`: retained continental fields.
 - `rock.u8`: one byte per cell, 1 sedimentary, 2 igneous, 3 metamorphic; 0 would mean unclassified and does not occur.
 - `pressure.f32`, `shear.f32`, `igneous.f32`: the geology proxies, listed under `geology_fields` in the manifest.
 - `rock-noise.f32`: the rock noise `rv`, saved because ore selection uses it again. `rock.u8` follows from these four fields, and `Load` checks that it does.
-- `diagnostics.json`: the coast interpretation, events requested per family, features placed per type, omissions, warnings, and cells of each rock on provisional land and ocean. The only warning so far is a backbone that crosses itself.
+- `diagnostics.json`: the provisional ocean (components of the lowest-affinity cells, the largest, and the cells that differ from the plain highest-affinity selection), the coast interpretation, events requested per family, features placed per type, omissions, warnings, and cells of each rock on provisional land and ocean. The only warning so far is a backbone that crosses itself.
   The coast section gives the working grid (about 50 km per cell), the greatest distance from the coast inland and offshore, and every coast chain: its length, the land and water areas it separates, and whether it circles the world.
 - `manifest.json`: format and generator version, the input manifest and its checksum, seed, grid, mode (`automatic` or `fixture`), provisional selection, rock parameters, recentering, and checksums for every saved file. Input and fixture paths are not recorded.
 - `preview.png`: provinces in pale tones by type (shield tan, sedimentary green, volcanic pink, oceanic blue) with their boundaries, the provisional coast in grey, each feature's envelope tinted by type, and backbones as dark lines.

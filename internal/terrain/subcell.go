@@ -510,7 +510,7 @@ func (e *engine) tile(t int, tb *tileBuf, res *synthesis) {
 				a := *pl.f.AxisFraction
 				line(gm, func(i int, u, s float64) {
 					if u < a {
-						floor := max(pl.at(pl.regional, s), tb.base[i]) - pl.at(pl.relief, s)
+						floor := max(max(pl.at(pl.regional, s), tb.base[i])-pl.at(pl.relief, s), min(tb.base[i], 0)-in.regional.RiftFloorM)
 						deepen(i, kernel(u/a)*max(0, out[i]-floor))
 					}
 				})

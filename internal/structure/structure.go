@@ -38,8 +38,8 @@ import (
 )
 
 const (
-	Format          = "mapgen-structure-v1"
-	Selection       = "highest-affinity; ties by input row-major index; round(fraction*cells)"
+	Format          = "mapgen-structure-v2"
+	Selection       = "round(fraction*cells) land cells with one connected ocean: the lowest-affinity cells, ties by input row-major index; their largest eight-connected torus component grown by affinity then index"
 	Topology        = "torus: x and y wrap; the map may be recentered until climate"
 	ModeFixture     = "fixture"
 	SeedExplicit    = "explicit"
@@ -103,7 +103,9 @@ type Manifest struct {
 // Diagnostics are derived, reviewable facts about a run. They hold no
 // timings, so they are as reproducible as the manifest.
 type Diagnostics struct {
-	Mode  string        `json:"mode"`
+	Mode string `json:"mode"`
+	// Ocean describes how the provisional ocean was made connected.
+	Ocean OceanSummary  `json:"ocean"`
 	Coast *CoastSummary `json:"coast,omitzero"`
 	// Requested counts automatic placement's requests by family. Placed
 	// counts the saved features by type.
@@ -112,6 +114,16 @@ type Diagnostics struct {
 	Omitted   []string       `json:"omitted"`
 	Warnings  []string       `json:"warnings"`
 	Rocks     *RockSummary   `json:"rocks,omitzero"`
+}
+
+// OceanSummary describes the provisional selection: the eight-connected
+// components of the lowest-affinity cells, the size of the largest, which
+// was grown into the ocean, and how many cells differ from the plain
+// highest-affinity selection.
+type OceanSummary struct {
+	Components   int `json:"components"`
+	LargestCells int `json:"largest_cells"`
+	RepairCells  int `json:"repair_cells"`
 }
 
 // Result keeps everything in the same coordinates. In Land, 1 is provisional
@@ -189,8 +201,12 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 	}
 	values := fields[continent.FieldAffinity].Values
 	k := int(math.Round(o.Fraction * float64(len(values))))
+	ocean, err := fracture.ConnectedOcean(ctx, values, g.Columns, g.Rows, k)
+	if err != nil {
+		return nil, err
+	}
 	land := make([]byte, len(values))
-	for i, isLand := range fracture.TopMask(values, k) {
+	for i, isLand := range ocean.Land {
 		if isLand {
 			land[i] = 1
 		}
@@ -212,7 +228,8 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 			CoastParameters: DefaultCoastParams(),
 		},
 		Land: land, Fields: fields, Features: ff,
-		Diagnostics: Diagnostics{Mode: mode, Placed: map[string]int{}, Omitted: []string{}},
+		Diagnostics: Diagnostics{Mode: mode, Placed: map[string]int{}, Omitted: []string{},
+			Ocean: OceanSummary{Components: ocean.Components, LargestCells: ocean.Largest, RepairCells: ocean.Repair}},
 	}
 	// Provinces and the coast share one simplified mask, so specks and
 	// puddles are neither provinces nor coastlines.
@@ -502,6 +519,9 @@ func load(ctx context.Context, dir string, m Manifest, full bool) (*Result, erro
 	}
 	if len(land) != g.Columns*g.Rows || count != m.ProvisionalLandCells {
 		return nil, fmt.Errorf("provisional mask size or count mismatch")
+	}
+	if !fracture.OceanConnected(func(i int) bool { return land[i] != 0 }, g.Columns, g.Rows) {
+		return nil, fmt.Errorf("the provisional ocean is not one connected component")
 	}
 	fdata, err := read(m.Features, FeaturesFile)
 	if err != nil {

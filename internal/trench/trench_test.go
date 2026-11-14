@@ -17,11 +17,11 @@ import (
 )
 
 // continentsDir writes a 480 x 240 continental artifact of 12 km cells,
-// not recentered, so the largest landmass lies off center. Seed 4 gives an
+// not recentered, so the largest landmass lies off center. Seed 5 gives an
 // active margin; a world this small has no room for island arcs.
 func continentsDir(t *testing.T) string {
 	t.Helper()
-	p, err := fracture.DefaultParams(4, 480, 240, 12)
+	p, err := fracture.DefaultParams(5, 480, 240, 12)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestGenerate(t *testing.T) {
 	in := structureDir(t)
 	r := generate(t, in, nil)
 	m := r.Manifest
-	if m.Seed != 4 || m.SeedSource != trench.SeedFromInput {
+	if m.Seed != 5 || m.SeedSource != trench.SeedFromInput {
 		t.Errorf("seed %d from %s", m.Seed, m.SeedSource)
 	}
 	ff := r.Structure.Features
@@ -127,9 +127,11 @@ func TestGenerate(t *testing.T) {
 	}
 	g := m.Grid
 	dom := r.Domain()
+	// Trenches avoid land except islands under the province minimum.
+	land := structure.Simplify(r.Structure.Manifest.ProvinceParameters, g, r.Structure.Land)
 	for _, tr := range r.Trenches.Trenches {
 		for i, in := range structure.Cover(dom, g.Columns, g.Rows, structure.NewLine(dom, tr.Backbone)) {
-			if in && r.Structure.Land[i] == 1 {
+			if in && land[i] == 1 {
 				t.Fatalf("trench %d covers provisional land at cell %d", tr.ID, i)
 			}
 		}

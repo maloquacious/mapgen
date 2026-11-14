@@ -7,10 +7,12 @@ go run ./cmd/continents --seed 42 --out tmp/continents
 go run ./cmd/structure --in tmp/continents --out tmp/structure
 go run ./cmd/trench --in tmp/structure --out tmp/trench
 go run ./cmd/terrain --in tmp/trench --png-scale 3 --out tmp/terrain
+go run ./cmd/landmask --in tmp/terrain --png-scale 3 --out tmp/landmask
 ```
 
 The design is in [Terrain Generation Design.md](<../../Terrain Generation Design.md>).
 This covers implementation steps 1 to 6 of that design: the continental foundation, the artifact, the regional surface each feature pulls the foundation toward, belt components, volcanic peaks, and trench depressions, subcell sampling, residual detail, and recentering.
+Step 7, freezing the coastline, is `landmask`'s terrain-input mode; see [its README](../landmask/README.md).
 
 ## Not implemented yet
 
@@ -58,7 +60,7 @@ A feature whose record gives no targets uses the ranges structure's automatic pl
 
 - Belts, island arcs, and plateaus raise ground below their target to it, and leave higher ground alone.
 - Basins lower ground above their target to it.
-- A rift raises its shoulders to its target, at full weight within its axis fraction and falling to 0 at its edge, and cuts its axis to the shoulder level minus its relief draw, so the axis may fall below the datum.
+- A rift raises its shoulders to its target, at full weight within its axis fraction and falling to 0 at its edge, and cuts its axis to the shoulder level minus its relief draw, so the axis may fall below the datum, but no more than `rift_floor_m` (300 m) below the lower of the foundation and the datum: on land a rift floor ends no deeper than a dry continental depression, and `landmask` can raise one cut off from the sea to the frozen coast.
 - Faults have no targets: a strike-slip fault is a trough 50–200 m deep, a normal fault a step of 100–300 m with a drawn downthrown side, and a thrust fault a ridge 100–300 m high, each confined to its width.
 
 Uplifts combine by the largest plus a quarter of the second largest, so crossing belts do not double; then the largest depression applies, so a basin inside a belt's flank lowers it to the basin's level.
@@ -108,7 +110,7 @@ The moved records are described as a trench manifest recentered by the combined 
 
 | File | Content |
 | --- | --- |
-| `manifest.json` | Format `mapgen-terrain-v7`, the recentering record, the recentered records manifest when the records moved, versions, the input trench manifest (which records the structure manifest) and its checksum, seed, grid, datum, parameters, retained records, and checksums |
+| `manifest.json` | Format `mapgen-terrain-v8`, the recentering record, the recentered records manifest when the records moved, versions, the input trench manifest (which records the structure manifest) and its checksum, seed, grid, datum, parameters, retained records, and checksums |
 | `elevation.f32`, `high.f32`, `relief.f32` | Float32 rasters, row-major, row 0 at the north |
 | `features.json`, `provinces.json`, `provinces.u32`, `provisional-land.u8`, `rock.u8`, `pressure.f32`, `shear.f32`, `igneous.f32`, `rock-noise.f32` | The structure records, byte for byte unless recentering moved them |
 | `trenches.json` | The trench records, byte for byte unless recentering moved them |
@@ -118,7 +120,7 @@ The moved records are described as a trench manifest recentered by the combined 
 | `preview-structure.png` | The same tint without shading, each feature's envelope outline, every backbone, trench backbones in red, ridge chains in white, branches in grey, troughs in blue, corridors in cyan, and volcanic peaks as red dots |
 
 The continental affinity fields are not kept; their checksums remain in the recorded input manifest chain.
-The shift reports what `landmask` would do at the provisional land fraction: the elevation it would move to 0 m, and how many cells would change sides.
+The shift reports what `landmask` would do at the provisional land fraction: the elevation it would move to 0 m, which `landmask` records as `sea_level_m`, and how many cells would change sides.
 Features move the coast where they raise shallow seabed or lower coastal land.
 
 On the full-size grid (6666 x 3333) a run takes about 17 seconds on 10 cores (about 40 seconds of CPU), with about 2 GB of peak resident memory.

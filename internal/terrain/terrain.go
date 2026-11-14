@@ -10,12 +10,11 @@
 // meters relative to a provisional datum, the provisional coast at 0 m, not
 // sea level; landmask chooses sea level later.
 //
-// So far it builds the continental foundation, the surface with no
-// features, and the regional surface each feature pulls it toward, at cell
-// centers, and publishes it with the structure and trench records it
-// retains.
-// Ridges, volcanic peaks, trench depressions, subcell rasterization,
-// residual detail, and recentering are later steps of the design.
+// It builds the continental foundation, the regional surface every feature
+// pulls it toward, belt components, volcanic peaks, and trench depressions,
+// samples them within each cell, adds residual detail, optionally recenters,
+// and publishes the result with the structure and trench records it
+// retains. landmask's terrain-input mode then freezes the coastline.
 package terrain
 
 import (
@@ -42,7 +41,7 @@ import (
 )
 
 const (
-	Format          = "mapgen-terrain-v7"
+	Format          = "mapgen-terrain-v8"
 	Topology        = "torus: x and y wrap; the map may be recentered until climate"
 	Datum           = "provisional: 0 m is the provisional coast of the structure records, not sea level"
 	SeedExplicit    = "explicit"
@@ -197,7 +196,10 @@ type Result struct {
 	// at the provisional fraction. It is derived, not saved.
 	Above       []bool
 	Diagnostics Diagnostics
-	records     map[string][]byte // retained files, by name, as read
+	// source is the directory the retained files are copied from when
+	// they did not move; Write verifies their checksums again. It is never
+	// recorded.
+	source string
 }
 
 // Options are the inputs to Generate.
@@ -234,10 +236,6 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("input: %w", err)
 	}
-	records, err := trench.ReadRecords(o.In, tm.Records())
-	if err != nil {
-		return nil, fmt.Errorf("input: %w", err)
-	}
 	s, sm := tr.Structure, tm.Input.Manifest
 	seed, source := tm.Seed, SeedFromInput
 	if o.Seed != nil {
@@ -258,7 +256,7 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 			ProvisionalLandFraction: sm.ProvisionalLandFraction, ProvisionalLandCells: sm.ProvisionalLandCells,
 			FoundationParameters: p, RegionalParameters: rp, BeltParameters: bp, SubcellParameters: sp, Residual: !o.NoResidual, ResidualParameters: rsp, FeatureSynthesis: SubcellAlgorithm, Retained: tm.Records(),
 		},
-		Structure: s, Trenches: tr.Trenches, records: records,
+		Structure: s, Trenches: tr.Trenches, source: o.In,
 	}
 	dist, err := coastDistance(ctx, s.Land, g.Columns, g.Rows, g.CellWidthKM, g.CellHeightKM)
 	if err != nil {
@@ -332,17 +330,8 @@ func (r *Result) diagnose() {
 	d := &r.Diagnostics
 	d.ElevationLand, d.ElevationWater = stats(r.Elevation, 1), stats(r.Elevation, 0)
 	d.ReliefLand, d.ReliefWater = stats(r.Relief, 1), stats(r.Relief, 0)
-	// The level is midway between the lowest cell selected and the highest
-	// left out; with every cell on one side, it is that side's extreme.
-	lowIn, highOut := math.Inf(1), math.Inf(-1)
-	d.Shift = Shift{LandCells: k}
+	d.Shift = Shift{LandCells: k, LevelM: QuantileLevel(r.Elevation, r.Above)}
 	for i, a := range r.Above {
-		e := float64(r.Elevation[i])
-		if a {
-			lowIn = min(lowIn, e)
-		} else {
-			highOut = max(highOut, e)
-		}
 		switch {
 		case a && land[i] == 0:
 			d.Shift.WaterToLand++
@@ -350,15 +339,30 @@ func (r *Result) diagnose() {
 			d.Shift.LandToWater++
 		}
 	}
+}
+
+// QuantileLevel returns the level a quantile selection of the cells marked
+// above moves to 0 m: midway between the lowest cell selected and the
+// highest left out, or that side's extreme with every cell on one side.
+func QuantileLevel(elev []float32, above []bool) float64 {
+	lowIn, highOut := math.Inf(1), math.Inf(-1)
+	for i, a := range above {
+		e := float64(elev[i])
+		if a {
+			lowIn = min(lowIn, e)
+		} else {
+			highOut = max(highOut, e)
+		}
+	}
 	switch {
 	case math.IsInf(lowIn, 1) && math.IsInf(highOut, -1):
+		return 0
 	case math.IsInf(lowIn, 1):
-		d.Shift.LevelM = highOut
+		return highOut
 	case math.IsInf(highOut, -1):
-		d.Shift.LevelM = lowIn
-	default:
-		d.Shift.LevelM = (lowIn + highOut) / 2
+		return lowIn
 	}
+	return (lowIn + highOut) / 2
 }
 
 // Write publishes a complete artifact using a sibling temporary directory.
@@ -418,11 +422,11 @@ func Write(ctx context.Context, dir string, r *Result, previewScale int) error {
 		m.RecenteredRecords, m.Retained = &tm, tm.Records()
 	} else {
 		for _, f := range m.Retained {
-			b, ok := r.records[f.File]
-			if !ok || checksum(b) != f.SHA256 {
-				return fmt.Errorf("retained record %s is missing or changed", f.File)
+			b, err := trench.ReadRecords(r.source, []File{f})
+			if err != nil {
+				return fmt.Errorf("retained record: %w", err)
 			}
-			if err := os.WriteFile(filepath.Join(tmp, f.File), b, 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(tmp, f.File), b[f.File], 0o644); err != nil {
 				return err
 			}
 		}
@@ -520,10 +524,6 @@ func Load(ctx context.Context, dir string) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	records, err := trench.ReadRecords(dir, m.Retained)
-	if err != nil {
-		return nil, err
-	}
 	if m.Diagnostics.File != DiagnosticsFile {
 		return nil, fmt.Errorf("manifest names %q where %q is expected", m.Diagnostics.File, DiagnosticsFile)
 	}
@@ -551,7 +551,7 @@ func Load(ctx context.Context, dir string) (*Result, error) {
 	if err := ridges.Validate(tr.Structure.Features); err != nil {
 		return nil, err
 	}
-	r := &Result{Manifest: m, Structure: tr.Structure, Trenches: tr.Trenches, Ridges: ridges, records: records}
+	r := &Result{Manifest: m, Structure: tr.Structure, Trenches: tr.Trenches, Ridges: ridges, source: dir}
 	if err := json.Unmarshal(ddata, &r.Diagnostics); err != nil {
 		return nil, fmt.Errorf("%s: %w", DiagnosticsFile, err)
 	}

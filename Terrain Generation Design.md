@@ -235,6 +235,8 @@ As maturity rises, chain amplitude falls toward the bottom of the relief range, 
   A basin under the datum floods at `landmask` only if it connects to the ocean; otherwise it is a closed depression for drainage to resolve.
 - **Rift:** the shoulders are uplift to the regional target, at full weight within `axis_fraction` `a` of the half width and weighing `K((t − a) / (1 − a))` beyond it; the axis is a depression weighing `K(t / a)` to the shoulder level, the larger of the target and the foundation, minus the relief draw.
   So the shoulders crest at the axis edge, and the axis floor may fall under the datum: a rift can become an inlet, a lake, or an arm of the sea.
+  In `regional-v3` the axis is at least `rift_floor_m` (300 m) below the lower of the foundation and the datum: on land a rift floor ends no deeper than a dry continental depression (the Dead Sea shore is 430 m below sea level), so `landmask` can raise a rift cut off from the sea to the frozen coast within its 500 m limit; offshore it may still cut 300 m below the seabed.
+  Without the floor, shoulders of 300 m and a relief draw of 2000 m put inland rift axes 1400 m below the datum on the full-size seed 42 map.
 - **Island arc:** a submarine ridge to its regional target, plus separate volcanic peaks along the backbone, each a compact cone 10–40 km across, 50–150 km apart, 0.6–1 of the relief draw high, with the profile `K(r / radius)`.
   Peaks that rise above sea level after `landmask` become the arc's islands.
 - **Trench:** each trench record is a narrow depression along its backbone, to its floor target below the datum, deepest on the axis and easing to the surrounding seabed at the edge of its width.
@@ -314,11 +316,11 @@ The order of draws within each stream is part of `terrain-v1`; changing it chang
 
 ## Saved artifact
 
-The format is `mapgen-terrain-v6`; v2 read a trench checkpoint instead of a structure checkpoint, v3 added the regional surface, v4 belt components, peaks, trench depressions, and `ridges.json`, v5 subcell sampling with real high and relief, v6 residual detail and plateau detail, and v7 recentering.
+The format is `mapgen-terrain-v8`; v2 read a trench checkpoint instead of a structure checkpoint, v3 added the regional surface, v4 belt components, peaks, trench depressions, and `ridges.json`, v5 subcell sampling with real high and relief, v6 residual detail and plateau detail, v7 recentering, and v8 the rift floor.
 
 | Content | Purpose |
 | --- | --- |
-| `manifest.json` | Format and generator versions, input trench manifest (which records the structure manifest) and its checksum, seed, grid, resolved parameters (`foundation-v2`, `regional-v2`, `belts-v1`, `subcell-v1`, `residual-v1`), how far feature synthesis goes (`feature_synthesis`), residual on or off, recentering, and checksums for every saved file |
+| `manifest.json` | Format and generator versions, input trench manifest (which records the structure manifest) and its checksum, seed, grid, resolved parameters (`foundation-v2`, `regional-v3`, `belts-v1`, `subcell-v1`, `residual-v1`), how far feature synthesis goes (`feature_synthesis`), residual on or off, recentering, and checksums for every saved file |
 | `elevation.f32` | `ElevationM`: mean solid surface elevation, m, relative to the provisional datum |
 | `high.f32` | `HighM`: representative high, m, at least `ElevationM` |
 | `relief.f32` | `ReliefM`: representative high minus valley, m, at least 0 |
@@ -371,7 +373,7 @@ Tests use the smallest grid that shows each behavior.
 2. **Kernel profile.**
    A straight belt of constant width with residual off and no ridges gives `F + w * (T − F)` across the belt within float32 tolerance.
 3. **Targets.**
-   With residual off, a plateau's interior lies at its regional draw; a basin's floor at its target; a rift's axis below its shoulders by the relief draw; every regional draw lies within its range.
+   With residual off, a plateau's interior lies at its regional draw; a basin's floor at its target; a rift's axis below its shoulders by the relief draw, or at its floor; every regional draw lies within its range.
 4. **Combination.**
    Two crossing belts reach at most the larger uplift plus 25 percent of the smaller; a basin inside a belt's flank lowers it to the basin level.
 5. **Seams.**
@@ -399,6 +401,20 @@ The specification's retry over continental attempts does not fit a staged pipeli
 A layout that fails steps 3 or 4 is an error that names the measure, and the user varies the terrain or structure seed.
 The terrain-mode artifact carries the clamped elevation, high, and relief fields with the frozen ocean mask, and its manifest identifies the input kind (`terrain`) and the selection algorithm, distinct from the affinity mode, which remains available for inspection.
 
+Implemented as `landmask` format `mapgen-landmask-terrain-v1`, selection `ocean-v1`; see `cmd/landmask/README.md`.
+
+- The command reads the input's manifest format and chooses the mode; without `--land-fraction`, terrain input uses its provisional land fraction.
+- Sea level is the level terrain's diagnostics report as the shift, midway between the lowest land and the highest water of the quantile, so the two always agree.
+- The connected-ocean selection is shared with structure (`fracture.ConnectedOcean`), which applies it to affinity for the provisional mask.
+  Before structure did so, the provisional mask's enclosed waters, which terrain correctly builds as sea floor, failed the repair limit on every seed: 3.1 percent on the full-size seed 42 map.
+- Clamping moves high with elevation, so relief is unchanged.
+  Non-ocean cells at or below sea level before clamping are counted as depressions, where drainage may place lakes; the rest is dry land.
+- The artifact retains the structure and trench records and `ridges.json` unchanged; ridge and saddle elevations stay relative to the provisional datum, and the manifest's `sea_level_m` converts them.
+- `--recenter` is not available for terrain input: recenter with `terrain --recenter`, which centers the land terrain implies.
+
+On the full-size seed 42 map sea level is 0.11 m below the provisional datum, the repair is 6,940 cells (0.031 percent) from 126 quantile ocean components, 3,470 cells are depressions, and the largest clamp raises a rift floor by 301 m.
+It runs in about 7 seconds with a peak of 1.7 GB.
+
 ## Implementation order
 
 1. **Foundation and artifact.** Done; see `cmd/terrain/README.md`.
@@ -415,7 +431,7 @@ The terrain-mode artifact carries the clamped elevation, high, and relief fields
    The 4 by 4 sampling, high and relief, the subcell relief model, the spatial index, and parallel tiles with the worker-count test.
 5. **Residual detail** with its bounds tests. Done, with plateau rolling detail and rims.
 6. **Recentering.** Done.
-7. **Landmask terrain-input mode.**
+7. **Landmask terrain-input mode.** Done; see "Landmask integration".
 
 ### Prerequisites in structure and trench
 
@@ -435,6 +451,8 @@ These choices were open and are settled:
 - Landform classes (plain, hills, mountain, plateau, basin) are deferred until after drainage, since they depend on the final coast and valleys.
 - Elevations are relative to the provisional datum, with the provisional coast at 0 m; terrain does not choose sea level.
   `landmask` alone counts the land exactly and decides which low ground joins the ocean, the land fraction can change without regenerating terrain, and terrain reports the shift `landmask` would make.
+- Structure's provisional mask has one connected ocean, selected by the same rule `landmask` applies to elevation, so terrain builds sea floor only where the sea is.
+- A rift's axis is floored 300 m below the lower of the foundation and the datum, so a rift on land cannot fail `landmask`'s clamp limit.
 - The continental affinity fields are not carried past structure.
   No later stage reads them: provinces mark oceanic and continental crust, and elevation replaces the layout values.
   If a later stage needs a continuous crust value, the intermediate stages will be extended to carry it forward.

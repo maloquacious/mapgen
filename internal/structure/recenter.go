@@ -39,12 +39,28 @@ type Recentering struct {
 // unrecentered one moved by whole cells: nothing is regenerated, and IDs,
 // keys, and component numbers are kept.
 func recenter(ctx context.Context, r *Result) error {
-	c, err := fracture.FindCentering(ctx, r.Fields[continent.FieldAffinity], r.Manifest.ProvisionalLandFraction)
+	c, err := r.centering(ctx)
 	if err != nil {
-		return fmt.Errorf("recenter: %w", err)
+		return err
 	}
 	r.Manifest.Recentering = record(r.Manifest.Grid, c, c.X, c.Y)
 	return translate(ctx, r, c.X, c.Y)
+}
+
+// centering finds the shift that centers the largest component of the
+// provisional mask.
+func (r *Result) centering(ctx context.Context) (fracture.Centering, error) {
+	g := r.Manifest.Grid
+	v := make([]float32, len(r.Land))
+	for i, x := range r.Land {
+		v[i] = float32(x)
+	}
+	f := &fracture.FractureField{Columns: g.Columns, Rows: g.Rows, WidthKM: g.WidthKM, HeightKM: g.HeightKM, Values: v}
+	c, err := fracture.FindCentering(ctx, f, r.Manifest.ProvisionalLandFraction)
+	if err != nil {
+		return c, fmt.Errorf("recenter: %w", err)
+	}
+	return c, nil
 }
 
 // Recenter translates a result read with LoadRecords so that its largest
@@ -58,14 +74,9 @@ func recenter(ctx context.Context, r *Result) error {
 // would have moved it, and a recentered one does not move.
 func (r *Result) Recenter(ctx context.Context) (Recentering, error) {
 	g := r.Manifest.Grid
-	v := make([]float32, len(r.Land))
-	for i, x := range r.Land {
-		v[i] = float32(x)
-	}
-	f := &fracture.FractureField{Columns: g.Columns, Rows: g.Rows, WidthKM: g.WidthKM, HeightKM: g.HeightKM, Values: v}
-	c, err := fracture.FindCentering(ctx, f, r.Manifest.ProvisionalLandFraction)
+	c, err := r.centering(ctx)
 	if err != nil {
-		return Recentering{}, fmt.Errorf("recenter: %w", err)
+		return Recentering{}, err
 	}
 	step := record(g, c, c.X, c.Y)
 	x, y := c.X, c.Y

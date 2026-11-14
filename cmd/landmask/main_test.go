@@ -12,6 +12,9 @@ import (
 	"github.com/maloquacious/mapgen/internal/continent"
 	"github.com/maloquacious/mapgen/internal/fracture"
 	"github.com/maloquacious/mapgen/internal/landmask"
+	"github.com/maloquacious/mapgen/internal/structure"
+	"github.com/maloquacious/mapgen/internal/terrain"
+	"github.com/maloquacious/mapgen/internal/trench"
 )
 
 func TestCommandArtifactAndPreview(t *testing.T) {
@@ -64,5 +67,68 @@ func TestCommandArtifactAndPreview(t *testing.T) {
 		if err := run(t.Context(), args); err == nil {
 			t.Fatalf("accepted invalid args %v", args)
 		}
+	}
+}
+
+func TestTerrainInput(t *testing.T) {
+	p, err := fracture.DefaultParams(42, 96, 48, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Recenter = true
+	cr, err := fracture.Generate(t.Context(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cdir := filepath.Join(t.TempDir(), "continents")
+	if err := continent.Write(cdir, continent.NewManifest("test", cr), cr); err != nil {
+		t.Fatal(err)
+	}
+	// Automatic placement on so small a world makes inland basins large
+	// enough to fail the repair limit; the fixture does not.
+	fixture, err := os.ReadFile("../../internal/structure/testdata/fixture.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sr, err := structure.Generate(t.Context(), structure.Options{In: cdir, Seed: new(uint64(7)), Fraction: 0.325, Features: fixture, Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sdir := filepath.Join(t.TempDir(), "structure")
+	if err := structure.Write(t.Context(), sdir, sr, 0); err != nil {
+		t.Fatal(err)
+	}
+	tr, err := trench.Generate(t.Context(), trench.Options{In: sdir, Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tdir := filepath.Join(t.TempDir(), "trench")
+	if err := trench.Write(t.Context(), tdir, tr, 0); err != nil {
+		t.Fatal(err)
+	}
+	r, err := terrain.Generate(t.Context(), terrain.Options{In: tdir, Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := filepath.Join(t.TempDir(), "terrain")
+	if err := terrain.Write(t.Context(), in, r, 0); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "landmask")
+	if err := run(t.Context(), []string{"--in", in, "--out", out}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := landmask.LoadTerrain(t.Context(), out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Manifest.LandCells != r.Manifest.ProvisionalLandCells {
+		t.Fatalf("%d land cells, want the provisional %d", got.Manifest.LandCells, r.Manifest.ProvisionalLandCells)
+	}
+	if _, err := os.Stat(filepath.Join(out, landmask.PreviewFile)); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(t.Context(), []string{"--in", in, "--out", filepath.Join(t.TempDir(), "x"), "--recenter"}); err == nil {
+		t.Fatal("accepted --recenter with terrain input")
 	}
 }

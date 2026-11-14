@@ -18,7 +18,7 @@ import (
 // target through the feature's envelope weight. See "Regional surface" in
 // the design.
 const (
-	RegionalAlgorithm = "regional-v2"
+	RegionalAlgorithm = "regional-v3"
 	DomainFeature     = "terrain-v1/feature"
 )
 
@@ -56,6 +56,11 @@ type RegionalParams struct {
 	PlateauRolling      float64    `json:"plateau_rolling"`
 	PlateauRim          float64    `json:"plateau_rim"`
 	PlateauWavelengthKM [2]float64 `json:"plateau_wavelength_km"`
+	// RiftFloorM is how far a rift's axis may reach below the lower of the
+	// foundation and the datum, so a rift on land ends no deeper than a dry
+	// continental depression and landmask can raise a rift cut off from the
+	// ocean to the frozen coast within its limit.
+	RiftFloorM float64 `json:"rift_floor_m"`
 	// CoreWeight is the least envelope weight of the cells whose elevation
 	// the diagnostics report as a feature's core.
 	CoreWeight float64 `json:"core_weight"`
@@ -68,7 +73,7 @@ func DefaultRegionalParams() RegionalParams {
 		Algorithm:         RegionalAlgorithm,
 		Kernel:            "K(t) = (1 - t^2)^2 for |t| < 1, t the cross-belt position",
 		AreaWeight:        "smoothstep of the outline mask",
-		Rift:              "shoulders weigh K((t - a) / (1 - a)) beyond the axis fraction a and 1 within it; the axis is a depression weighing K(t / a) to the shoulder level minus the relief draw",
+		Rift:              "shoulders weigh K((t - a) / (1 - a)) beyond the axis fraction a and 1 within it; the axis is a depression weighing K(t / a) to the shoulder level minus the relief draw, at least rift_floor_m below min(foundation, 0)",
 		ControlSpacingKM:  [2]float64{150, 400},
 		SecondUpliftShare: 0.25,
 		DefaultTargets: map[string]TargetRange{
@@ -88,6 +93,7 @@ func DefaultRegionalParams() RegionalParams {
 			"thrust":      {100, 300},
 		},
 		PlateauRolling: 0.25, PlateauRim: 0.5, PlateauWavelengthKM: [2]float64{120, 48},
+		RiftFloorM: 300,
 		CoreWeight: 0.9,
 	}
 }
