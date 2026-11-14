@@ -57,7 +57,8 @@ go run ./cmd/structure \
 | `--out` | New output directory; default `tmp/structure` |
 | `--seed` | Structure seed; if omitted, use the continental input's seed. The manifest records the seed and whether it was explicit. Stages share a seed safely because each draws from streams keyed by its own domain names |
 | `--provisional-land-fraction` | Fraction used to interpret continental affinity while placing features; default 0.325 |
-| `--config` | Deferred. A file that supplies values for these flags; not needed yet and not part of version one |
+| `--config` | Calibration file, `mapgen-structure-config-v1`, overriding the provinces, coast, placement, and rock parameters; see `cmd/structure/README.md` |
+| `--print-config` | Print the default calibration as a configuration file |
 | `--features` | Optional explicit feature fixture for algorithm development and repeatable visual comparisons |
 | `--recenter` | Optional translation of the complete result; off by default |
 | `--png` | Generate diagnostic previews; default true |

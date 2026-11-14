@@ -68,7 +68,7 @@ go run ./cmd/terrain \
 `--print-config` prints the defaults as such a file, a starting point to edit.
 A configuration changes values, not algorithms: algorithm names and descriptions cannot change, maps keep the default keys, every number stays finite with its default's sign (zero allowed), every pair keeps its order, values the algorithms divide or count by stay positive, and shares stay at most 1; anything else is refused with the name of the value.
 The resolved values are recorded in the manifest as the `*_parameters`, so the artifact alone says how it was made; the file's path is not recorded.
-Structure's `--config` is still deferred.
+Structure has the same mechanism, `mapgen-structure-config-v1`.
 There is no fixture flag: structure's `--features` already supplies fixed features, and terrain reads them, with the trenches, from the trench artifact.
 
 ## Inputs and physical domain

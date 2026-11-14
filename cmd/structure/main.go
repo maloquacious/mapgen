@@ -10,6 +10,8 @@ package main
 
 import (
 	"context"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"flag"
 	"fmt"
@@ -45,6 +47,8 @@ func run(ctx context.Context, args []string) error {
 	recenter := fs.Bool("recenter", false, "translate the complete result to center the largest provisional landmass")
 	png := fs.Bool("png", true, "write the previews")
 	scale := fs.Int("png-scale", 1, "preview sampling interval in cells; 1 shows every cell")
+	configFile := fs.String("config", "", "calibration file (mapgen-structure-config-v1) naming only the values it changes; see --print-config")
+	printConfig := fs.Bool("print-config", false, "print the default calibration as a configuration file and exit")
 	version := fs.Bool("version", false, "print version and exit")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -55,6 +59,26 @@ func run(ctx context.Context, args []string) error {
 	if *version {
 		fmt.Println(mapgen.Version().String())
 		return nil
+	}
+	if *printConfig {
+		b, err := json.Marshal(structure.DefaultConfig(), json.Deterministic(true), jsontext.WithIndent("  "))
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(b))
+		return nil
+	}
+	var cfg *structure.Config
+	if *configFile != "" {
+		data, err := os.ReadFile(*configFile)
+		if err != nil {
+			return err
+		}
+		c, err := structure.ParseConfig(data)
+		if err != nil {
+			return err
+		}
+		cfg = &c
 	}
 	if *png && *scale < 1 {
 		return fmt.Errorf("png-scale must be at least 1")
@@ -79,7 +103,7 @@ func run(ctx context.Context, args []string) error {
 	}
 	r, err := structure.Generate(ctx, structure.Options{
 		In: *in, Seed: seed, Fraction: *fraction, Features: fixture, Version: mapgen.Version().String(),
-		Recenter: *recenter,
+		Recenter: *recenter, Config: cfg,
 	})
 	if err != nil {
 		return err

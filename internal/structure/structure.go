@@ -156,6 +156,8 @@ type Options struct {
 	Features []byte  // contents of a feature fixture; nil places features automatically
 	Version  string  // generator version
 	Recenter bool    // translate the complete result to center the largest provisional landmass
+	// Config is the calibration; nil uses DefaultConfig. It must be valid.
+	Config *Config
 }
 
 func checksum(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
@@ -167,6 +169,13 @@ func checksum(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToStrin
 func Generate(ctx context.Context, o Options) (*Result, error) {
 	if !(o.Fraction >= 0 && o.Fraction <= 1) {
 		return nil, fmt.Errorf("provisional-land-fraction must be in [0,1]")
+	}
+	cfg := DefaultConfig()
+	if o.Config != nil {
+		if err := o.Config.Validate(); err != nil {
+			return nil, fmt.Errorf("config: %w", err)
+		}
+		cfg = *o.Config
 	}
 	// Parse and checksum the same bytes.
 	data, err := os.ReadFile(filepath.Join(o.In, continent.ManifestFile))
@@ -224,8 +233,8 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 			Seed:  seed, SeedSource: source, SeedDerivation: prng.DerivationVersion, PRNG: prng.Algorithm,
 			Grid: g, Topology: Topology, Mode: mode,
 			ProvisionalLandFraction: o.Fraction, ProvisionalLandCells: k, ProvisionalSelection: Selection,
-			RockClassification: Absent, ProvinceParameters: DefaultProvinceParams(),
-			CoastParameters: DefaultCoastParams(),
+			RockClassification: Absent, ProvinceParameters: cfg.Provinces,
+			CoastParameters: cfg.Coast,
 		},
 		Land: land, Fields: fields, Features: ff,
 		Diagnostics: Diagnostics{Mode: mode, Placed: map[string]int{}, Omitted: []string{},
@@ -243,7 +252,7 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 	}
 	r.Diagnostics.Coast = r.Coast.Summary()
 	if mode == ModeAutomatic {
-		p := DefaultPlacementParams()
+		p := cfg.Placement
 		r.Manifest.PlacementParameters = &p
 		landKM2 := float64(k) * g.CellWidthKM * g.CellHeightKM
 		if ff.Features, err = place(ctx, seed, p, dom, r.Coast, landKM2, &r.Diagnostics); err != nil {
@@ -266,7 +275,7 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 			return nil, err
 		}
 	}
-	rp := DefaultRockParams()
+	rp := cfg.Rocks
 	geo, err := classifyRocks(ctx, seed, rp, g, ff, r.Provinces, r.Owner, r.Coast)
 	if err != nil {
 		return nil, err

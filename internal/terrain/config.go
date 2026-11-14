@@ -6,9 +6,8 @@ package terrain
 import (
 	"encoding/json/v2"
 	"fmt"
-	"math"
-	"reflect"
-	"slices"
+
+	"github.com/maloquacious/mapgen/internal/calib"
 )
 
 // ConfigFormat is the format of a terrain configuration file.
@@ -54,20 +53,11 @@ func ParseConfig(data []byte) (Config, error) {
 	return c, nil
 }
 
-// Validate checks values against the defaults' shape and the bounds the
-// algorithms rely on:
-//
-//   - Algorithm names and descriptions are those of this version; a
-//     configuration changes values, not algorithms.
-//   - Maps have exactly the default keys.
-//   - Every number is finite and keeps its default's sign, zero allowed: a
-//     depth stays a depth and a width a width.
-//   - Every pair keeps its default's order, so a range stays a range.
-//   - Values the algorithms divide by or count with are positive, and
-//     shares are at most 1.
+// Validate checks the values against the defaults' shape (see calib.Like)
+// and the bounds the algorithms rely on: values they divide or count by
+// are positive, and shares are at most 1.
 func (c Config) Validate() error {
-	d := DefaultConfig()
-	if err := like(reflect.ValueOf(c), reflect.ValueOf(d), "config"); err != nil {
+	if err := calib.Like(c, DefaultConfig(), "config"); err != nil {
 		return err
 	}
 	f, rg, b, s, r := c.Foundation, c.Regional, c.Belts, c.Subcell, c.Residual
@@ -90,31 +80,16 @@ func (c Config) Validate() error {
 	} {
 		positive[pair.name+"[0]"], positive[pair.name+"[1]"] = pair.v[0], pair.v[1]
 	}
-	names := make([]string, 0, len(positive))
-	for k := range positive {
-		names = append(names, k)
+	if err := calib.Positive(positive); err != nil {
+		return err
 	}
-	slices.Sort(names)
-	for _, k := range names {
-		if !(positive[k] > 0) {
-			return fmt.Errorf("%s must be positive", k)
-		}
-	}
-	shares := map[string]float64{
+	if err := calib.Shares(map[string]float64{
 		"regional.second_uplift_share": rg.SecondUpliftShare, "regional.core_weight": rg.CoreWeight,
 		"belts.volcanic_share": b.VolcanicShare, "belts.maturity_amplitude": b.MaturityAmplitude,
 		"residual.persistence": r.Persistence, "residual.maturity_damping": r.MaturityDamping,
 		"foundation.variation_share": f.VariationShare,
-	}
-	names = names[:0]
-	for k := range shares {
-		names = append(names, k)
-	}
-	slices.Sort(names)
-	for _, k := range names {
-		if shares[k] > 1 {
-			return fmt.Errorf("%s must be at most 1", k)
-		}
+	}); err != nil {
+		return err
 	}
 	switch {
 	case !(b.SaddleShare[0] > 0 && b.SaddleShare[1] < 1):
@@ -132,64 +107,4 @@ func (c Config) Validate() error {
 		}
 	}
 	return nil
-}
-
-// like checks that v has d's shape, strings, signs, and pair orders.
-func like(v, d reflect.Value, path string) error {
-	switch d.Kind() {
-	case reflect.Struct:
-		t := d.Type()
-		for i := range t.NumField() {
-			name := t.Field(i).Name
-			if tag := t.Field(i).Tag.Get("json"); tag != "" {
-				name = tag
-			}
-			if err := like(v.Field(i), d.Field(i), path+"."+name); err != nil {
-				return err
-			}
-		}
-	case reflect.Map:
-		if v.Len() != d.Len() {
-			return fmt.Errorf("%s: keys must be those of the defaults", path)
-		}
-		for _, k := range d.MapKeys() {
-			e := v.MapIndex(k)
-			if !e.IsValid() {
-				return fmt.Errorf("%s: missing key %v", path, k)
-			}
-			if err := like(e, d.MapIndex(k), fmt.Sprintf("%s[%v]", path, k)); err != nil {
-				return err
-			}
-		}
-	case reflect.Array:
-		for i := range d.Len() {
-			if err := like(v.Index(i), d.Index(i), fmt.Sprintf("%s[%d]", path, i)); err != nil {
-				return err
-			}
-		}
-		if d.Len() == 2 {
-			a, b, da, db := num(v.Index(0)), num(v.Index(1)), num(d.Index(0)), num(d.Index(1))
-			if da <= db && a > b || da > db && a < b {
-				return fmt.Errorf("%s: the range must keep its order", path)
-			}
-		}
-	case reflect.String:
-		if v.String() != d.String() {
-			return fmt.Errorf("%s: %q cannot be changed", path, d.String())
-		}
-	case reflect.Float64, reflect.Int:
-		x, dx := num(v), num(d)
-		if math.IsNaN(x) || math.IsInf(x, 0) || dx > 0 && x < 0 || dx < 0 && x > 0 {
-			return fmt.Errorf("%s: %g must be finite with the sign of its default %g", path, x, dx)
-		}
-	}
-	return nil
-}
-
-// num returns a float or int value as float64.
-func num(v reflect.Value) float64 {
-	if v.Kind() == reflect.Int {
-		return float64(v.Int())
-	}
-	return v.Float()
 }

@@ -50,6 +50,7 @@ Contracts and invariants (wrapping, determinism, land fraction, artifact formats
    It partitions the map into geological provinces and interprets the provisional coast (coast distance and coast chains on a 50 km working grid). Features come from an explicit fixture file or from automatic placement, which places collision belts with plateaus and foreland basins, active margins with inland basins, intermontane basins inside wide belts, old orogens (some interrupted), rifts, island arcs, interior basins, and faults.
    Rock classification converts features and provinces to geological proxies (pressure, shear, igneous influence) and classifies every cell as sedimentary, igneous, or metamorphic.
    `--recenter` translates the complete result to center the largest landmass.
+   `--config` overrides calibration values from a `mapgen-structure-config-v1` file (`--print-config` prints the defaults).
    See [cmd/structure/README.md](cmd/structure/README.md).
 
 4. `cmd/trench`: decides which side of each active margin and island arc subducts and places ocean trenches there, from a `structure` artifact, and writes a self-contained trench checkpoint that retains the structure records.
@@ -83,6 +84,7 @@ The planned generation order is `continents → structure → trench → terrain
 - `internal/trench`: subduction polarity, trench placement and clipping, trench records and their validation, recentering, and the trench artifact.
 - `internal/terrain`: the coast distance transform, the continental foundation, the regional surface, belt components and ridge records, trench depressions, tiled subcell rasterization, residual detail, recentering, and the terrain artifact.
 - `internal/artifact`: helpers shared by packages that publish artifact directories.
+- `internal/calib`: validation shared by the stages' calibration files.
 - `internal/prng`: reproducible random streams derived from a seed and a domain name.
 - `internal/cerrs`: constant sentinel errors.
 - `internal/dotenv`: environment file loading.

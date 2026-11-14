@@ -18,10 +18,6 @@ go run ./cmd/structure --in tmp/c96 --features internal/structure/testdata/fixtu
 The design is in [Structure Generation Design.md](<../../Structure Generation Design.md>).
 This covers implementation steps 1 to 5 of that design: feature records, geometry queries, artifact storage, fixture input, provinces, the coast interpretation, automatic placement, rock classification, and recentering.
 
-## Not implemented yet
-
-- `--config`.
-
 ## Flags
 
 | Flag | Meaning |
@@ -32,9 +28,19 @@ This covers implementation steps 1 to 5 of that design: feature records, geometr
 | `--seed` | Structure seed, unsigned 64-bit. If omitted, the continental input's seed is used; the manifest records the seed and which of the two it was. It decides province seeds, boundaries, volcanic draws, automatic placement, and rock noise |
 | `--provisional-land-fraction` | Fraction of cells treated as land while placing features; default 0.325 |
 | `--recenter` | Translate the complete result so the largest provisional landmass is centered; default false. See below |
+| `--config` | Calibration file overriding default parameters; see "Configuration" |
+| `--print-config` | Print the default calibration as a configuration file and exit |
 | `--png` | Write `preview.png`, `preview-rock.png`, and `preview-coast.png`; default true |
 | `--png-scale` | Sampling interval in cells for `preview.png`; default 1. `preview-coast.png` has its own scale |
 | `--version` | Print the generator version |
+
+## Configuration
+
+`--config` reads a calibration file in format `mapgen-structure-config-v1`: the format, and any of the sections `provinces`, `coast`, `placement`, and `rocks`, each naming only the values it changes; map entries (rock influences) merge by key.
+`--print-config` prints the defaults as such a file, a starting point to edit.
+A configuration changes values, not algorithms, by the same rules as terrain's (shared in `internal/calib`): algorithm names and descriptions cannot change, maps keep the default keys, optional values (a family's maturity, an influence's profiles) cannot be added or removed, every number stays finite with its default's sign (zero allowed), and every pair keeps its order, except `placement.fault_sense`, two shares that must sum to at most 1.
+Values the algorithms divide or count by stay positive, shares and depth fractions stay at most 1, `placement.axis_fraction` lies strictly between 0 and 1, and `rocks.shelf_km` increases; anything else is refused with the name of the value.
+The resolved values are recorded in the manifest (`province_parameters`, `coast_parameters`, `rock_parameters`, and `placement_parameters` when features are placed automatically), and later stages read them from there, so the artifact alone says how it was made; the file's path is not recorded.
 
 ## Automatic placement
 
