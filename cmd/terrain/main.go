@@ -41,6 +41,7 @@ func run(ctx context.Context, args []string) error {
 	seedFlag := fs.String("seed", "", "terrain seed, unsigned 64-bit (default: the trench input's seed)")
 	png := fs.Bool("png", true, "write the previews")
 	scale := fs.Int("png-scale", 1, "preview sampling interval in cells; 1 shows every cell")
+	residual := fs.Bool("residual", true, "add residual detail; false publishes the structured surface alone")
 	workers := fs.Int("workers", 0, "worker goroutines (default: one per CPU); never affects the output")
 	version := fs.Bool("version", false, "print version and exit")
 	if err := fs.Parse(args); err != nil {
@@ -67,7 +68,7 @@ func run(ctx context.Context, args []string) error {
 		}
 		seed = &v
 	}
-	r, err := terrain.Generate(ctx, terrain.Options{In: *in, Seed: seed, Workers: *workers, Version: mapgen.Version().String()})
+	r, err := terrain.Generate(ctx, terrain.Options{In: *in, Seed: seed, Workers: *workers, NoResidual: !*residual, Version: mapgen.Version().String()})
 	if err != nil {
 		return err
 	}

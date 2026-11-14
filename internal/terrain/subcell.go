@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 
 	"github.com/maloquacious/mapgen/internal/continent"
+	"github.com/maloquacious/mapgen/internal/fracture"
 	"github.com/maloquacious/mapgen/internal/prng"
 	"github.com/maloquacious/mapgen/internal/structure"
 	"github.com/maloquacious/mapgen/internal/trench"
@@ -49,7 +50,8 @@ func DefaultSubcellParams() SubcellParams {
 type synthInput struct {
 	seed     uint64
 	regional RegionalParams
-	belts    *BeltParams // nil: the regional surface alone
+	belts    *BeltParams     // nil: the regional surface alone
+	residual *ResidualParams // nil: no residual detail
 	subcell  SubcellParams
 	grid     continent.Grid
 	features *structure.FeatureFile
@@ -136,6 +138,9 @@ type engine struct {
 	trough    []*geom
 	corridors map[uint32][]int // corridor indices by feature
 	trenches  []trenchPlan
+	frames    []*frame                   // by feature, for mountain belts
+	plateau   [2]*fracture.FractureField // plateau rolling and rim fields
+	noise     *noise                     // residual noise; nil when off
 	// index lists, for each tile, the items that reach it as (kind, index)
 	// pairs, in kind order and then index order.
 	tx, ty int
@@ -163,6 +168,25 @@ func regional(ctx context.Context, in synthInput) (*synthesis, error) {
 		}
 		if f.Linear() {
 			e.geoms[i] = newGeom(e.dom, f.Backbone)
+		}
+		if f.Type == structure.TypePlateau && e.plateau[0] == nil {
+			for k := range e.plateau {
+				if e.plateau[k], err = noiseField(ctx, g, in.regional.PlateauWavelengthKM[k], in.seed, DomainPlateau, uint64(k)); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	if in.residual != nil {
+		var err error
+		if e.noise, err = residualNoise(ctx, in.seed, *in.residual, g); err != nil {
+			return nil, err
+		}
+		e.frames = make([]*frame, len(ff.Features))
+		for i := range ff.Features {
+			if f := &ff.Features[i]; f.Type == structure.TypeMountainBelt {
+				e.frames[i] = newFrame(e.dom, f.Backbone)
+			}
 		}
 	}
 	if in.belts != nil {
@@ -319,6 +343,7 @@ type tileBuf struct {
 	base, up1, up2, dep, ridge, basin []float64
 	touched                           []bool
 	crest, comp                       []float64 // by cell of the tile
+	grain                             []grain   // by cell of the tile
 	best, tt                          []float64 // line scratch
 	seg                               []int32
 }
@@ -345,11 +370,22 @@ func (e *engine) tile(t int, tb *tileBuf, res *synthesis) {
 	w := window{c0 * e.s, r0 * e.s, nc * e.s, nr * e.s}
 	np := w.wn * w.wm
 	items := e.index[t]
+	tb.grain = grow(tb.grain, nc*nr)
+	// finish publishes a cell, adding residual detail to its structured
+	// surface.
+	finish := func(cell int, elev, high, relief float64, gr grain) {
+		if e.noise != nil {
+			x, y := (float64(cell%e.cols)+0.5)*in.grid.CellWidthKM, (float64(cell/e.cols)+0.5)*in.grid.CellHeightKM
+			d, rough := e.noise.residual(*in.residual, x, y, elev, relief, gr)
+			elev, high, relief = elev+d, high+d+rough/2, relief+rough
+		}
+		res.elevation[cell], res.high[cell], res.relief[cell] = float32(elev), max(float32(high), float32(elev)), max(0, float32(relief))
+	}
 	if len(items) == 0 {
 		for r := r0; r < r0+nr; r++ {
 			for c := c0; c < c0+nc; c++ {
 				i := r*e.cols + c
-				res.elevation[i], res.high[i], res.relief[i] = in.center[i], in.center[i], 0
+				finish(i, float64(in.center[i]), float64(in.center[i]), 0, grain{})
 			}
 		}
 		return
@@ -394,6 +430,12 @@ func (e *engine) tile(t int, tb *tileBuf, res *synthesis) {
 	}
 	deepen := func(i int, v float64) { tb.dep[i] = max(tb.dep[i], v) }
 
+	// The sample nearest each cell's center stands for the cell in the
+	// residual's grain.
+	mid := e.s / 2
+	local := func(i int) int { return ((w.wr0+i/w.wn)/e.s-r0)*nc + (w.wc0+i%w.wn)/e.s - c0 }
+	isMid := func(i int) bool { return (w.wr0+i/w.wn)%e.s == mid && (w.wc0+i%w.wn)%e.s == mid }
+
 	// Uplifts: the two largest at each point.
 	for _, it := range items {
 		if it[0] != itemFeature {
@@ -404,14 +446,37 @@ func (e *engine) tile(t int, tb *tileBuf, res *synthesis) {
 		f := tb.base
 		switch ft := pl.f.Type; {
 		case ft == structure.TypeMountainBelt || ft == structure.TypeIslandArc:
-			line(gm, func(i int, u, s float64) { uplift(i, kernel(u)*max(0, pl.at(pl.regional, s)-f[i])) })
+			fr := (*frame)(nil)
+			if e.frames != nil {
+				fr = e.frames[k]
+			}
+			line(gm, func(i int, u, s float64) {
+				wt := kernel(u)
+				uplift(i, wt*max(0, pl.at(pl.regional, s)-f[i]))
+				if fr != nil && isMid(i) {
+					if c := local(i); wt > tb.grain[c].w {
+						tx, ty := fr.tangent(s, in.belts.StationKM)
+						tb.grain[c] = grain{w: wt, tx: tx, ty: ty, maturity: *pl.f.Maturity}
+					}
+				}
+			})
 		case ft == structure.TypeRift:
 			a := *pl.f.AxisFraction
 			line(gm, func(i int, u, s float64) {
 				uplift(i, kernel(max(0, u-a)/(1-a))*max(0, pl.at(pl.regional, s)-f[i]))
 			})
 		case ft == structure.TypePlateau:
-			area(pl, func(i int, wt float64) { uplift(i, wt*max(0, pl.regional[0]-f[i])) })
+			// The surface rolls, and the edge band is dissected.
+			rp := in.regional
+			e.areaWindow(w, pl.region.Bounds(), func(i int, p structure.Point) {
+				m := pl.region.Mask(p)
+				if m <= 0 {
+					return
+				}
+				tb.touched[i] = true
+				detail := rp.PlateauRolling*e.plateau[0].SampleTorus(p.X, p.Y) + rp.PlateauRim*4*m*(1-m)*e.plateau[1].SampleTorus(p.X, p.Y)
+				uplift(i, smoothstep(0, 1, m)*max(0, pl.regional[0]+pl.relief[0]*detail-f[i]))
+			})
 		case ft == structure.TypeFault && pl.f.Sense == "thrust":
 			line(gm, func(i int, u, _ float64) { uplift(i, kernel(u)*pl.offset) })
 		case ft == structure.TypeFault && pl.f.Sense == "normal":
@@ -474,7 +539,6 @@ func (e *engine) tile(t int, tb *tileBuf, res *synthesis) {
 	// Ridges and peaks combine by maximum and add to the surface. crest
 	// records, by cell, the crest of a ridge passing near a sample or of a
 	// peak centered in the cell; comp the largest component sampled.
-	local := func(i int) int { return ((w.wr0+i/w.wn)/e.s-r0)*nc + (w.wc0+i%w.wn)/e.s - c0 }
 	near := math.Hypot(e.fx, e.fy) / 2
 	put := func(i int, v float64) {
 		v *= 1 - tb.basin[i]
@@ -565,16 +629,14 @@ func (e *engine) tile(t int, tb *tileBuf, res *synthesis) {
 					any = any || tb.touched[i]
 				}
 			}
+			lc := r*nc + c
 			if !any {
-				res.elevation[cell], res.high[cell], res.relief[cell] = in.center[cell], in.center[cell], 0
+				finish(cell, float64(in.center[cell]), float64(in.center[cell]), 0, tb.grain[lc])
 				continue
 			}
 			mean := sum / float64(e.s*e.s)
-			lc := r*nc + c
 			high := max(hi+max(0, tb.crest[lc]-tb.comp[lc]), mean)
-			res.elevation[cell] = float32(mean)
-			res.high[cell] = max(float32(high), float32(mean))
-			res.relief[cell] = max(0, res.high[cell]-float32(lo))
+			finish(cell, mean, high, high-lo, tb.grain[lc])
 		}
 	}
 }

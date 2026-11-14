@@ -18,7 +18,7 @@ import (
 // target through the feature's envelope weight. See "Regional surface" in
 // the design.
 const (
-	RegionalAlgorithm = "regional-v1"
+	RegionalAlgorithm = "regional-v2"
 	DomainFeature     = "terrain-v1/feature"
 )
 
@@ -50,6 +50,12 @@ type RegionalParams struct {
 	// strike-slip trough, the height of a normal fault's step, and the
 	// height of a thrust ridge.
 	FaultM map[string][2]float64 `json:"fault_m"`
+	// A plateau's surface rolls by PlateauRolling of its relief draw and
+	// its edge band is dissected by up to PlateauRim of it, following two
+	// smooth fields of PlateauWavelengthKM.
+	PlateauRolling      float64    `json:"plateau_rolling"`
+	PlateauRim          float64    `json:"plateau_rim"`
+	PlateauWavelengthKM [2]float64 `json:"plateau_wavelength_km"`
 	// CoreWeight is the least envelope weight of the cells whose elevation
 	// the diagnostics report as a feature's core.
 	CoreWeight float64 `json:"core_weight"`
@@ -81,6 +87,7 @@ func DefaultRegionalParams() RegionalParams {
 			"normal":      {100, 300},
 			"thrust":      {100, 300},
 		},
+		PlateauRolling: 0.25, PlateauRim: 0.5, PlateauWavelengthKM: [2]float64{120, 48},
 		CoreWeight: 0.9,
 	}
 }

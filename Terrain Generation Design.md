@@ -227,7 +227,9 @@ As maturity rises, chain amplitude falls toward the bottom of the relief range, 
 ### Other features
 
 - **Plateau:** a flat surface at its regional target inside its outline, rising over `edge_km`.
-  Its relief target sets low-amplitude rolling detail and a rougher, dissected rim along the edge band; these come with residual detail (step 5).
+  Its relief target sets low-amplitude rolling detail and a rougher, dissected rim along the edge band.
+  In `regional-v2` the plateau's target at a point is its regional draw plus its relief draw times 0.25 of one smooth field (120 km wavelength) plus 0.5 × 4m(1 − m) of another (48 km), `m` the outline mask, so the interior rolls and the rim is roughest midway up the edge.
+  This is structured surface, kept with `--residual=false`.
   It blends with its parent belt's flank through the uplift rule.
 - **Basin:** a depression to its regional target, which is low (0–400 m on land), with a smooth floor.
   A basin under the datum floods at `landmask` only if it connects to the ocean; otherwise it is a closed depression for drainage to resolve.
@@ -281,6 +283,18 @@ Within a belt envelope, the noise is stretched along the local backbone directio
 The noise is a fracture field, like the rock noise, built on grids that tile the world, so it wraps on both axes.
 `--residual=false` omits it, and the result must still show every feature clearly.
 
+`residual-v1` does this at cell centers, after subcell sampling:
+
+- The noise has octaves of 192, 96, and 48 km, weighted 0.7^k, each a fracture field on a grid of a quarter of its wavelength normalized to [−1, 1].
+  An octave whose grid would be finer than two cells is left out, so at coarser cells there are fewer octaves.
+- Within a belt, the noise is the mean of 13 samples along the backbone direction over ±150 km, blended with the plain noise by the belt's kernel weight at the cell; the belt with the largest weight sets the direction.
+  The amplitude falls by up to half with maturity times that weight.
+- The amplitude is 10 percent of the structured relief, at least the 20 m floor; but the floor is at most half the cell's distance from the datum.
+  Without this cap the floor floods and drains flat coastal plains: at seed 42 it moved 614,000 cells across the provisional coast, where features move 18,000.
+  With it, only relief, which features make, can move the coast.
+- Shorter wavelengths are not added to the elevation: half the amplitude is added to `ReliefM`, and a quarter to `HighM`.
+- Tests measure the bound on every cell, less than 0.1 percent of the residual's power at wavelengths under four cells, and residual differences along a belt below 0.6 of those across it.
+
 ## Random keys and streams
 
 All streams use `prng.New(seed, domain, sequence)` with the terrain seed:
@@ -292,6 +306,7 @@ All streams use `prng.New(seed, domain, sequence)` with the terrain seed:
 | `terrain-v1/feature` | Feature `key` | Target control samples, chains, branches, gaps, corridors, and peaks for one feature. A fault draws its offset, then its downthrown side; a linear feature its control spacing, then a regional and a relief value at each control sample; an area feature its regional and relief values. A mountain belt then draws its chain count, chain width share, and for each chain its jitter, scale, two wavelengths and phases, two end trims, and fade; then each chain's gaps, each chain's branches (angle, reach, scale, side), each adjacent pair's trough (presence, start, length, depth), its corridors (angle, half width, saddle share), and for an active margin the presence of volcanic peaks and then each peak (diameter, height). An island arc draws its peaks |
 | `terrain-v1/trench` | Trench `key` | The floor of one trench: its control spacing, then a floor value at each control sample |
 | `terrain-v1/residual` | Octave number | One octave of residual noise |
+| `terrain-v1/plateau` | Field number | The plateau rolling field (0) and rim field (1), shared by every plateau |
 
 Using the feature `key`, not the feature ID or its position in the list, keeps each feature's terrain independent of every other feature: adding, removing, or reordering a feature in a fixture leaves the others unchanged.
 Plateaus and basins have their own keys and streams; their parent's stream is not consumed on their behalf.
@@ -299,11 +314,11 @@ The order of draws within each stream is part of `terrain-v1`; changing it chang
 
 ## Saved artifact
 
-The format is `mapgen-terrain-v5`; v2 read a trench checkpoint instead of a structure checkpoint, v3 added the regional surface, v4 belt components, peaks, trench depressions, and `ridges.json`, and v5 subcell sampling with real high and relief.
+The format is `mapgen-terrain-v6`; v2 read a trench checkpoint instead of a structure checkpoint, v3 added the regional surface, v4 belt components, peaks, trench depressions, and `ridges.json`, v5 subcell sampling with real high and relief, and v6 residual detail and plateau detail.
 
 | Content | Purpose |
 | --- | --- |
-| `manifest.json` | Format and generator versions, input trench manifest (which records the structure manifest) and its checksum, seed, grid, resolved parameters (`foundation-v2`, `regional-v1`, `belts-v1`, `subcell-v1`, and later `residual-v1`), how far feature synthesis goes (`feature_synthesis`), residual on or off, recentering, and checksums for every saved file |
+| `manifest.json` | Format and generator versions, input trench manifest (which records the structure manifest) and its checksum, seed, grid, resolved parameters (`foundation-v2`, `regional-v2`, `belts-v1`, `subcell-v1`, `residual-v1`), how far feature synthesis goes (`feature_synthesis`), residual on or off, recentering, and checksums for every saved file |
 | `elevation.f32` | `ElevationM`: mean solid surface elevation, m, relative to the provisional datum |
 | `high.f32` | `HighM`: representative high, m, at least `ElevationM` |
 | `relief.f32` | `ReliefM`: representative high minus valley, m, at least 0 |
@@ -392,7 +407,7 @@ The terrain-mode artifact carries the clamped elevation, high, and relief fields
    Still evaluated at cell centers, so peaks narrower than a cell may fall between centers until step 4.
 4. **Subcell rasterization.** Done.
    The 4 by 4 sampling, high and relief, the subcell relief model, the spatial index, and parallel tiles with the worker-count test.
-5. **Residual detail** with its bounds tests.
+5. **Residual detail** with its bounds tests. Done, with plateau rolling detail and rims.
 6. **Recentering.**
 7. **Landmask terrain-input mode.**
 
@@ -410,6 +425,7 @@ The structure fixture's world is too small for a trench, so trench depressions a
 These choices were open and are settled:
 
 - Trenches are records of their own `trench` stage, between structure and terrain, rather than a terrain addition or a structure feature.
+- The residual floor is capped at half a cell's distance from the datum, so residual detail alone never moves the provisional coast.
 - Landform classes (plain, hills, mountain, plateau, basin) are deferred until after drainage, since they depend on the final coast and valleys.
 - Elevations are relative to the provisional datum, with the provisional coast at 0 m; terrain does not choose sea level.
   `landmask` alone counts the land exactly and decides which low ground joins the ocean, the land fraction can change without regenerating terrain, and terrain reports the shift `landmask` would make.

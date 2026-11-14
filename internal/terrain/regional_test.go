@@ -136,7 +136,8 @@ func TestPlateauAndBasinTargets(t *testing.T) {
 	}
 	r, hl := structure.NewRegion(testDom, p.Outline, p.EdgeKM), structure.NewLine(testDom, host.Backbone)
 	for i, e := range out {
-		if m := r.Mask(center(i)); m == 1 && !near(float64(e), draw[0]) {
+		// The interior rolls by up to PlateauRolling of the relief draw.
+		if m := r.Mask(center(i)); m == 1 && math.Abs(float64(e)-draw[0]) > DefaultRegionalParams().PlateauRolling*diags[0].ReliefM[0]+1e-3 {
 			t.Fatalf("plateau interior cell %d at %g, want %g", i, e, draw[0])
 		} else if m == 0 && e != 200 && hl.Cross(center(i)) >= 1 {
 			t.Fatalf("cell %d outside the plateau at %g", i, e)

@@ -71,6 +71,16 @@ func generate(t *testing.T, in string, seed *uint64) *terrain.Result {
 	return r
 }
 
+// structured generates without residual detail.
+func structured(t *testing.T, in string) *terrain.Result {
+	t.Helper()
+	r, err := terrain.Generate(t.Context(), terrain.Options{In: in, NoResidual: true, Version: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
 func write(t *testing.T, r *terrain.Result) string {
 	t.Helper()
 	out := filepath.Join(t.TempDir(), "terrain")
@@ -114,7 +124,7 @@ func sameFiles(t *testing.T, a, b map[string]string) {
 // surface only within their reach.
 func TestFoundationKeepsProvisionalCoast(t *testing.T) {
 	in := inputDir(t)
-	r := generate(t, in, nil)
+	r := structured(t, in)
 	land := r.Structure.Land
 	fd := terrain.Foundation(r)
 	ff := r.Structure.Features
@@ -197,7 +207,7 @@ func TestFoundationKeepsProvisionalCoast(t *testing.T) {
 // Every fixture feature shows in the surface, and each core conforms to its
 // targets.
 func TestFixtureHandoff(t *testing.T) {
-	r := generate(t, inputDir(t), nil)
+	r := structured(t, inputDir(t))
 	ff := r.Structure.Features
 	params := r.Manifest.RegionalParameters
 	if len(r.Diagnostics.Features) != len(ff.Features) {
@@ -230,9 +240,9 @@ func TestFixtureHandoff(t *testing.T) {
 		if !within(d.RegionalM, want.RegionalElevationM) || !within(d.ReliefM, want.ReliefM) {
 			t.Errorf("feature %d: draws %v and %v outside %+v", f.ID, d.RegionalM, d.ReliefM, want)
 		}
-		// A plateau stands far above any lowland, so its core reaches its
-		// draw.
-		if f.Type == structure.TypePlateau && math.Abs(d.Core.MaxM-d.RegionalM[0]) > 1 {
+		// A plateau stands far above any lowland, so its core lies at its
+		// draw, give or take its rolling surface and dissected rim.
+		if f.Type == structure.TypePlateau && math.Abs(d.Core.MeanM-d.RegionalM[0]) > (params.PlateauRolling+params.PlateauRim)*d.ReliefM[0] {
 			t.Errorf("plateau %d: core %+v, draw %g", f.ID, d.Core, d.RegionalM[0])
 		}
 	}
@@ -283,6 +293,36 @@ func TestArtifactRoundTrip(t *testing.T) {
 	// An existing output is never replaced.
 	if err := terrain.Write(t.Context(), out, r, 0); err == nil {
 		t.Error("replaced an existing output")
+	}
+}
+
+// --residual=false is recorded, and leaves out the residual alone.
+func TestResidualSwitch(t *testing.T) {
+	in := inputDir(t)
+	on, off := generate(t, in, nil), structured(t, in)
+	if !on.Manifest.Residual || off.Manifest.Residual {
+		t.Errorf("residual recorded as %v and %v", on.Manifest.Residual, off.Manifest.Residual)
+	}
+	p := on.Manifest.ResidualParameters
+	moved := 0
+	for i, e := range on.Elevation {
+		o := float64(off.Elevation[i])
+		if d := math.Abs(float64(e) - o); d > max(min(p.FloorM, p.DatumShare*math.Abs(o)), p.Share*float64(off.Relief[i]))+1e-3 {
+			t.Fatalf("cell %d moved %g", i, d)
+		} else if d > 0 {
+			moved++
+		}
+		// Without relief, the residual never crosses the datum.
+		if off.Relief[i] == 0 && (e > 0) != (o > 0) {
+			t.Fatalf("cell %d crossed the datum: %g to %g", i, o, e)
+		}
+	}
+	if moved == 0 {
+		t.Error("the residual changed nothing")
+	}
+	loaded, err := terrain.Load(t.Context(), write(t, off))
+	if err != nil || loaded.Manifest.Residual {
+		t.Errorf("load: %v, residual %v", err, loaded.Manifest.Residual)
 	}
 }
 

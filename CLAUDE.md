@@ -54,10 +54,11 @@ Contracts and invariants (wrapping, determinism, land fraction, artifact formats
    See [cmd/trench/README.md](cmd/trench/README.md).
 
 5. `cmd/terrain`: builds ground and seabed elevation from a `trench` artifact and writes a self-contained terrain checkpoint that retains the structure and trench records.
-   So far it builds the continental foundation, the regional surface, belt components, and subcell sampling (steps 1 to 4 of the terrain design): an exact full-resolution torus coast distance, a coastal plain rising to smoothed province base levels, a shelf (narrow near active margins and arcs), slope, and abyssal plain; then every feature pulls that surface toward its drawn regional target through its envelope weight, uplifts combining by the largest plus a quarter of the next, depressions by the largest.
+   So far it builds the continental foundation, the regional surface, belt components, subcell sampling, and residual detail (steps 1 to 5 of the terrain design): an exact full-resolution torus coast distance, a coastal plain rising to smoothed province base levels, a shelf (narrow near active margins and arcs), slope, and abyssal plain; then every feature pulls that surface toward its drawn regional target through its envelope weight, uplifts combining by the largest plus a quarter of the next, depressions by the largest.
    Belts then carry ridge chains with gaps, branches, troughs, and corridors with saddles; arcs and active margins carry volcanic peaks; trenches deepen the seabed. These are published in `ridges.json`.
    Cells that features reach are sampled at 4 x 4 points for mean elevation, high, and relief, in parallel tiles whose result does not depend on the worker count.
-   Elevations are relative to the provisional coast at 0 m; residual detail comes next.
+   Residual noise (no wavelength under four cells, at most 10 percent of relief, grain along belts) is added unless `--residual=false`.
+   Elevations are relative to the provisional coast at 0 m; recentering comes next.
    See [cmd/terrain/README.md](cmd/terrain/README.md).
 
 Later stages (terrain features, the terrain-based landmask, drainage, climate, biomes, resources) are not implemented yet.
@@ -72,7 +73,7 @@ The planned generation order is `continents → structure → trench → terrain
 - `internal/landmask`: creating, storing, and loading the land/ocean artifact.
 - `internal/structure`: feature records and their validation, toroidal geometry queries, province partitioning, coast interpretation, automatic placement, geology proxies and rock classification, recentering, and the structure artifact.
 - `internal/trench`: subduction polarity, trench placement and clipping, trench records and their validation, recentering, and the trench artifact.
-- `internal/terrain`: the coast distance transform, the continental foundation, the regional surface, belt components and ridge records, trench depressions, tiled subcell rasterization, and the terrain artifact.
+- `internal/terrain`: the coast distance transform, the continental foundation, the regional surface, belt components and ridge records, trench depressions, tiled subcell rasterization, residual detail, and the terrain artifact.
 - `internal/artifact`: helpers shared by packages that publish artifact directories.
 - `internal/prng`: reproducible random streams derived from a seed and a domain name.
 - `internal/cerrs`: constant sentinel errors.

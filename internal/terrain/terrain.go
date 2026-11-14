@@ -42,7 +42,7 @@ import (
 )
 
 const (
-	Format          = "mapgen-terrain-v5"
+	Format          = "mapgen-terrain-v6"
 	Topology        = "torus: x and y wrap; the map may be recentered until climate"
 	Datum           = "provisional: 0 m is the provisional coast of the structure records, not sea level"
 	SeedExplicit    = "explicit"
@@ -98,6 +98,10 @@ type Manifest struct {
 	RegionalParameters      RegionalParams   `json:"regional_parameters"`
 	BeltParameters          BeltParams       `json:"belt_parameters"`
 	SubcellParameters       SubcellParams    `json:"subcell_parameters"`
+	// Residual says whether residual detail was added; its parameters are
+	// recorded either way.
+	Residual           bool           `json:"residual"`
+	ResidualParameters ResidualParams `json:"residual_parameters"`
 	// FeatureSynthesis names how far features are synthesized:
 	// SubcellAlgorithm, the regional surface with belt components, peaks,
 	// and trenches, sampled within each cell they reach.
@@ -190,10 +194,13 @@ type Result struct {
 
 // Options are the inputs to Generate.
 type Options struct {
-	In      string  // trench artifact directory
-	Workers int     // worker goroutines; 0 for one per CPU. Never affects the output
-	Seed    *uint64 // terrain seed; nil uses the trench seed
-	Version string  // generator version
+	In      string // trench artifact directory
+	Workers int    // worker goroutines; 0 for one per CPU. Never affects the output
+	// NoResidual leaves out residual detail, publishing the structured
+	// surface alone.
+	NoResidual bool
+	Seed       *uint64 // terrain seed; nil uses the trench seed
+	Version    string  // generator version
 }
 
 func checksum(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
@@ -226,7 +233,11 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 		seed, source = *o.Seed, SeedExplicit
 	}
 	g := sm.Grid
-	p, rp, bp, sp := DefaultFoundationParams(), DefaultRegionalParams(), DefaultBeltParams(), DefaultSubcellParams()
+	p, rp, bp, sp, rsp := DefaultFoundationParams(), DefaultRegionalParams(), DefaultBeltParams(), DefaultSubcellParams(), DefaultResidualParams()
+	var residual *ResidualParams
+	if !o.NoResidual {
+		residual = &rsp
+	}
 	r := &Result{
 		Manifest: Manifest{
 			Format: Format, GeneratorVersion: o.Version,
@@ -234,7 +245,7 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 			Seed:  seed, SeedSource: source, SeedDerivation: prng.DerivationVersion, PRNG: prng.Algorithm,
 			Grid: g, Topology: Topology, Datum: Datum,
 			ProvisionalLandFraction: sm.ProvisionalLandFraction, ProvisionalLandCells: sm.ProvisionalLandCells,
-			FoundationParameters: p, RegionalParameters: rp, BeltParameters: bp, SubcellParameters: sp, FeatureSynthesis: SubcellAlgorithm, Retained: tm.Records(),
+			FoundationParameters: p, RegionalParameters: rp, BeltParameters: bp, SubcellParameters: sp, Residual: !o.NoResidual, ResidualParameters: rsp, FeatureSynthesis: SubcellAlgorithm, Retained: tm.Records(),
 		},
 		Structure: s, Trenches: tr.Trenches, records: records,
 	}
@@ -268,7 +279,7 @@ func Generate(ctx context.Context, o Options) (*Result, error) {
 		workers = runtime.NumCPU()
 	}
 	syn, err := regional(ctx, synthInput{
-		seed: seed, regional: rp, belts: &bp, subcell: sp, grid: g, features: s.Features, trenches: tr.Trenches, land: s.Land,
+		seed: seed, regional: rp, belts: &bp, residual: residual, subcell: sp, grid: g, features: s.Features, trenches: tr.Trenches, land: s.Land,
 		base: base, center: r.foundation, workers: workers,
 	})
 	if err != nil {
